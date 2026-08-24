@@ -478,10 +478,12 @@ function Write-DashPayload {
 
     # sessions.json = voor de HUD en de CYD, sessions.js = voor dashboard.html
     # (een <script src> mag wel op file://, een fetch() niet)
-    $targets = @(
-        @{ Path = (Join-Path $Root 'sessions.json'); Text = $json },
-        @{ Path = (Join-Path $Root 'sessions.js');   Text = ('window.__SESSIONS_PAYLOAD = ' + $json + ';') }
-    )
+    # sessions.json is voor de HUD en de CYD. sessions.js is alleen nodig voor de
+    # dashboardpagina, dus dat bestand maken we alleen als die er ook echt is.
+    $targets = @( @{ Path = (Join-Path $Root 'sessions.json'); Text = $json } )
+    if (Test-Path (Join-Path $Root 'dashboard.html')) {
+        $targets += @{ Path = (Join-Path $Root 'sessions.js'); Text = ('window.__SESSIONS_PAYLOAD = ' + $json + ';') }
+    }
     # Eerst naar .tmp en dan omwisselen: de HUD schrijft elke 3 seconden en het
     # dashboard leest sessions.js elke 15 seconden -- zonder deze truc lees je
     # af en toe een half bestand.

@@ -40,6 +40,20 @@ tussen `Notification` en `Stop` namelijk niets.
 
 ## Aan de slag
 
+Voor anderen is er een installeerbaar pakket: bouw het met
+
+```
+python build-pakket.py
+```
+
+Dat levert `ClaudeDeck.zip` op met alleen wat nodig is om de HUD te draaien —
+zonder de dashboardpagina en zonder de geplande taak. Uitpakken en
+`Installeer.cmd` dubbelklikken; de installer zet de bestanden neer, koppelt de
+hooks, maakt snelkoppelingen en start de HUD. Zie
+[installer/LEESMIJ.md](installer/LEESMIJ.md).
+
+Op deze machine zelf, vanuit deze map:
+
 ```powershell
 # 1. hooks installeren (eenmalig)
 powershell -ExecutionPolicy Bypass -File install-hooks.ps1
@@ -63,6 +77,8 @@ Uitgebreide uitleg staat in **[README-sessies.md](README-sessies.md)**.
 | `session-api.ps1`, `api.vbs`, `actions.json` | webservice + wat de fysieke knoppen doen |
 | `cyd/` | Arduino-sketch voor de ESP32-2432S028R, TFT-instellingen, flash-instructies |
 | `case/` | printbare behuizing: STL's, parametrische generator, bouwbeschrijving |
+| `installer/` | installatiepakket voor andere machines |
+| `build-pakket.py` | zet `ClaudeDeck.zip` in elkaar |
 | `README-sessies.md` | de volledige handleiding |
 
 ## Wat er bewust niet in staat

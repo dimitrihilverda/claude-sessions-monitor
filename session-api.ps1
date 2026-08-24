@@ -79,6 +79,8 @@ function Format-Cyd($p) {
     [void]$sb.Append('#').Append($p.attention).Append('|').Append($p.active).Append('|').Append($p.done).Append('|').Append((Get-Date).ToString('HH:mm:ss')).Append('|').Append(($labels -join ';')).Append("`n")
     foreach ($s in $p.sessions) {
         $why = ([string]$s.why -replace '[\r\n\|]', ' ')
+        # de naam is de titel van de sessie; zet de map ervoor in de tweede regel
+        if ($s.folder) { $why = ([string]$s.folder -replace '[\r\n\|]', ' ') + ' - ' + $why }
         if ($why.Length -gt 64) { $why = $why.Substring(0, 64) }
         $nm = ([string]$s.name -replace '[\r\n\|]', ' ')
         [void]$sb.Append($s.state).Append('|').Append($nm).Append('|').Append($s.since).Append('|').Append($why).Append('|').Append($s.session_id).Append("`n")

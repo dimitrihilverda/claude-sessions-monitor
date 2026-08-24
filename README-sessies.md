@@ -23,6 +23,18 @@ opdracht, wanneer Claude om aandacht vraagt en bij afronden schrijft
 `beacon.ps1` een statusbestandje naar `session-status\` en bundelt alles in
 `sessions.json` (voor de HUD en de CYD) en `sessions.js` (voor de webpagina).
 
+### Hoe een sessie heet
+
+De naam van een sessie is niet de mapnaam maar de **titel die Claude Code zelf
+bijhoudt**. De hook stuurt het pad van het transcript mee; daar staat de
+samenvatting van het gesprek in, en anders pakt de beacon de eerste opdracht.
+Zonder titel (bijvoorbeeld vlak na het starten) valt hij terug op de mapnaam.
+Hebben twee zichtbare sessies toch dezelfde naam, dan komt er een kort stukje
+van hun session_id achter, zodat je ze uit elkaar houdt.
+
+De map waarin een sessie draait staat in de tweede regel, samen met het tijdstip
+en waar Claude mee bezig is.
+
 ### Statussen
 
 | Laatste hook-event | Status | Kleur |

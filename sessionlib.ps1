@@ -101,6 +101,65 @@ function Test-DashOwnerAlive($s) {
     return $true
 }
 
+# ---- de titel van een sessie ------------------------------------------------
+# De mapnaam is geen goede naam: draaien er twee sessies in dezelfde map, dan
+# heten ze allebei hetzelfde. Claude Code houdt zelf een samenvatting bij in het
+# transcript dat de hook meestuurt; die gebruiken we als titel, en anders de
+# eerste opdracht uit het gesprek.
+function Get-DashTranscript([string]$path, [string]$sessionId) {
+    if ($path -and (Test-Path -LiteralPath $path)) { return $path }
+    if ($sessionId) {
+        $root = Join-Path $env:USERPROFILE '.claude\projects'
+        if (Test-Path $root) {
+            $hit = Get-ChildItem -Path $root -Filter ($sessionId + '.jsonl') -Recurse -File -ErrorAction SilentlyContinue |
+                   Select-Object -First 1
+            if ($hit) { return $hit.FullName }
+        }
+    }
+    return ''
+}
+
+function Get-DashShort([string]$s, [int]$max = 64) {
+    $s = ([string]$s -replace '\s+', ' ').Trim()
+    if ($s.Length -gt $max) { $s = $s.Substring(0, $max - 1) + '...' }
+    return $s
+}
+
+function Get-DashTitle([string]$path, [string]$sessionId) {
+    $file = Get-DashTranscript $path $sessionId
+    if (-not $file) { return '' }
+
+    # 1. de samenvatting van Claude Code zelf; de laatste is de actueelste
+    $sum = ''
+    try {
+        foreach ($line in (Get-Content -LiteralPath $file -Tail 120 -Encoding UTF8 -ErrorAction Stop)) {
+            if ($line -notmatch '"type"\s*:\s*"summary"') { continue }
+            try { $o = $line | ConvertFrom-Json } catch { continue }
+            if ($o.summary) { $sum = [string]$o.summary }
+        }
+    } catch { }
+    if ($sum) { return (Get-DashShort $sum) }
+
+    # 2. anders de eerste echte opdracht uit het gesprek
+    try {
+        foreach ($line in (Get-Content -LiteralPath $file -TotalCount 40 -Encoding UTF8 -ErrorAction Stop)) {
+            if ($line -notmatch '"type"\s*:\s*"user"') { continue }
+            try { $o = $line | ConvertFrom-Json } catch { continue }
+            $c = $o.message.content
+            $t = ''
+            if ($c -is [string]) { $t = $c }
+            elseif ($c) {
+                foreach ($b in $c) { if ($b.type -eq 'text' -and $b.text) { $t = [string]$b.text; break } }
+            }
+            if (-not $t) { continue }
+            # systeemregels en slash-commando's overslaan
+            if ($t -match '^\s*<' -or $t -match 'command-name' -or $t -match '^\s*Caveat:') { continue }
+            return (Get-DashShort $t)
+        }
+    } catch { }
+    return ''
+}
+
 # ---- de sessielijst ---------------------------------------------------------
 # Leest alle beacons, bepaalt status en zichtbaarheid, voegt /clear-dubbelingen
 # samen (zelfde Claude-proces = een sessie) en ruimt met -Prune dode bestanden op.
@@ -153,10 +212,15 @@ function Get-DashSessions {
             continue
         }
 
-        $cwd  = [string]$s.cwd
-        $name = 'Claude'
-        if ($cwd) { try { $name = Split-Path -Leaf $cwd } catch { } }
-        if (-not $name) { $name = 'Claude' }
+        $cwd    = [string]$s.cwd
+        $folder = 'Claude'
+        if ($cwd) { try { $folder = Split-Path -Leaf $cwd } catch { } }
+        if (-not $folder) { $folder = 'Claude' }
+
+        # titel uit het transcript; valt terug op de mapnaam
+        $title = ''
+        if ($s.PSObject.Properties['title']) { $title = [string]$s.title }
+        $name = if ($title) { $title } else { $folder }
 
         $hidden = $false
         foreach ($h in $DashHideCwds) {
@@ -182,6 +246,8 @@ function Get-DashSessions {
             rank       = (Get-DashRank $state)
             cwd        = $cwd
             name       = $name
+            title      = $title
+            folder     = $folder
             label      = $(if ($snoozedUntil) { 'Snooze tot ' + $snoozedUntil.ToString('HH:mm') } else { Get-DashStateLabel $state })
             snoozed    = [bool]$snoozedUntil
             why        = $why
@@ -193,6 +259,22 @@ function Get-DashSessions {
             hidden     = $hidden
             visible    = $visible
             sort_ts    = $upd
+        }
+    }
+
+    # Twee sessies met dezelfde naam (bijvoorbeeld twee keer dezelfde map,
+    # zonder titel) krijgen er een kort stukje van hun session_id achter, anders
+    # weet je niet welke welke is.
+    $perNaam = @{}
+    foreach ($x in ($list | Where-Object { $_.visible })) {
+        if (-not $perNaam.ContainsKey($x.name)) { $perNaam[$x.name] = @() }
+        $perNaam[$x.name] += $x
+    }
+    foreach ($k in @($perNaam.Keys)) {
+        if ($perNaam[$k].Count -gt 1) {
+            foreach ($x in $perNaam[$k]) {
+                $x.name = $x.name + '  #' + $x.session_id.Substring(0, 4)
+            }
         }
     }
 
@@ -224,6 +306,7 @@ function Write-DashPayload {
             state      = $s.state
             cwd        = $s.cwd
             name       = $s.name
+            folder     = $s.folder
             label      = $s.label
             why        = $s.why
             since      = $s.since

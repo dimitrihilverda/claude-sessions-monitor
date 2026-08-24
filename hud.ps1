@@ -244,8 +244,11 @@ $form.Add_Paint({
         [void](Draw-Chip $g ($rect.Right - 8) ($rect.Y + 6) $r.label $col)
 
         if (-not $cfg.compact) {
+            # regel 1 is de titel van de sessie, regel 2 vertelt waar hij draait
             $why = [string]$r.why
             if (-not $why) { $why = $r.cwd }
+            $waar = [string]$r.folder
+            if ($waar) { $why = "$waar  ·  $why" }
             $wb = New-Object System.Drawing.SolidBrush $C.Muted
             $fmt = New-Object System.Drawing.StringFormat
             $fmt.Trimming = [System.Drawing.StringTrimming]::EllipsisCharacter
@@ -301,7 +304,7 @@ function Refresh-Now {
     # Hertekenen is wat je als geknipper zag: doe het alleen als er echt iets
     # verandert. Wisselt alleen de klok, dan is de kopregel genoeg.
     $rows  = @($state.rows)
-    $fpUi  = (($rows | ForEach-Object { $_.session_id + '|' + $_.state + '|' + $_.label + '|' + $_.why + '|' + $_.since }) -join ';') + '#' + $state.known
+    $fpUi  = (($rows | ForEach-Object { $_.session_id + '|' + $_.state + '|' + $_.label + '|' + $_.name + '|' + $_.why + '|' + $_.since }) -join ';') + '#' + $state.known
     $clock = if ($state.lastOk) { $state.lastOk.ToString('HH:mm') } else { '--:--' }
 
     $countChanged = ($rows.Count -ne $state.lastCount)

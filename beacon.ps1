@@ -77,6 +77,7 @@ $prevPrompt = ''
 $prevAge    = [double]::MaxValue
 $prevPid    = 0
 $prevStart  = ''
+$prevTitle  = ''
 if (Test-Path $file) {
     try {
         $prev       = Get-Content $file -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -84,6 +85,7 @@ if (Test-Path $file) {
         $prevPrompt = [string]$prev.prompt
         $prevAge    = ((Get-Date) - [datetime]$prev.updated).TotalSeconds
         if ($prev.PSObject.Properties['state'])       { $prevState = [string]$prev.state }
+        if ($prev.PSObject.Properties['title'])       { $prevTitle = [string]$prev.title }
         if ($prev.PSObject.Properties['owner_pid'])   { $prevPid   = [int]$prev.owner_pid }
         if ($prev.PSObject.Properties['owner_start']) { $prevStart = [string]$prev.owner_start }
     } catch { }
@@ -124,11 +126,21 @@ if ($prevPid -gt 0) {
     $owner = Get-DashOwner
 }
 
+# De titel komt uit het transcript. Eenmaal gevonden bewaren we hem; bij Stop
+# kijken we opnieuw, want dan kan Claude Code net een nieuwe samenvatting
+# hebben weggeschreven.
+$title = $prevTitle
+if (-not $title -or $ev -eq 'Stop') {
+    $t = Get-DashTitle ([string]$j.transcript_path) ([string]$j.session_id)
+    if ($t) { $title = $t }
+}
+
 $status = [ordered]@{
     session_id  = $j.session_id
     event       = $ev                  # SessionStart | UserPromptSubmit | PreToolUse | PostToolUse | Notification | Stop | SessionEnd
     state       = (Get-DashState $ev)
     tool        = [string]$j.tool_name # bij de tool-hooks: waar Claude mee bezig is
+    title       = $title            # echte naam van de sessie, uit het transcript
     cwd         = $j.cwd
     prompt      = $prompt              # laatste opdracht (ingekort) -> "waar mee bezig"
     message     = $msg                 # bij Notification: waarom er aandacht nodig is

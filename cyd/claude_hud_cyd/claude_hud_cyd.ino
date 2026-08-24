@@ -212,11 +212,18 @@ void drawRow(int i) {
     row.fillRect(6, 0, sel ? 5 : 3, ROW_H - 3, c);
     if (sel) row.drawRoundRect(6, 0, 308, ROW_H - 3, 6, c);
 
-    row.setTextFont(4);
-    row.setTextColor(COL_TXT, sel ? COL_SEL : COL_ROW);
+    // Korte naam groot, langere titel een maatje kleiner: sinds de beacon de
+    // echte sessietitel meestuurt zijn die namen een stuk langer dan een mapnaam.
     String nm = rows[i].name;
-    if (nm.length() > 16) nm = nm.substring(0, 15) + ".";
-    row.drawString(nm, 16, 2);
+    row.setTextColor(COL_TXT, sel ? COL_SEL : COL_ROW);
+    if (nm.length() <= 16) {
+      row.setTextFont(4);
+      row.drawString(nm, 16, 2);
+    } else {
+      row.setTextFont(2);
+      if (nm.length() > 34) nm = nm.substring(0, 33) + ".";
+      row.drawString(nm, 16, 4);
+    }
 
     row.setTextFont(2);
     row.setTextColor(c, sel ? COL_SEL : COL_ROW);

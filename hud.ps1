@@ -202,6 +202,7 @@ $form.Add_Paint({
 
     $mb = New-Object System.Drawing.SolidBrush $C.Muted
     $meta = "$(@($state.rows).Count) live  ·  $($state.clock)"
+    if ($cfg.onlyAttention) { $meta = "filter aan  ·  " + $meta }
     $mw = $g.MeasureString($meta, $F.Small).Width
     $g.DrawString($meta, $F.Small, $mb, ($W - $mw - 12), 9)
     $mb.Dispose()
@@ -216,8 +217,17 @@ $form.Add_Paint({
 
     if (@($state.rows).Count -eq 0) {
         $eb = New-Object System.Drawing.SolidBrush $C.Muted
-        $g.DrawString('Geen actieve sessies.', $F.Why, $eb, 14, ($y + 6))
-        $g.DrawString("$($state.known) beacons bekend", $F.Small, $eb, 14, ($y + 24))
+        if ($cfg.onlyAttention) {
+            # anders lijkt de HUD kapot terwijl er alleen een filter aan staat
+            $ob = New-Object System.Drawing.SolidBrush $C.Orange
+            $g.DrawString('Geen sessie vraagt aandacht.', $F.Why, $eb, 14, ($y + 6))
+            $g.DrawString('Filter "alleen aandacht nodig" staat aan — rechtermuis om hem uit te zetten.',
+                          $F.Small, $ob, 14, ($y + 24))
+            $ob.Dispose()
+        } else {
+            $g.DrawString('Geen actieve sessies.', $F.Why, $eb, 14, ($y + 6))
+            $g.DrawString("$($state.known) beacons bekend", $F.Small, $eb, 14, ($y + 24))
+        }
         $eb.Dispose()
         return
     }
@@ -304,7 +314,7 @@ function Refresh-Now {
     # Hertekenen is wat je als geknipper zag: doe het alleen als er echt iets
     # verandert. Wisselt alleen de klok, dan is de kopregel genoeg.
     $rows  = @($state.rows)
-    $fpUi  = (($rows | ForEach-Object { $_.session_id + '|' + $_.state + '|' + $_.label + '|' + $_.name + '|' + $_.why + '|' + $_.since }) -join ';') + '#' + $state.known
+    $fpUi  = (($rows | ForEach-Object { $_.session_id + '|' + $_.state + '|' + $_.label + '|' + $_.name + '|' + $_.why + '|' + $_.since }) -join ';') + '#' + $state.known + '#' + $cfg.onlyAttention
     $clock = if ($state.lastOk) { $state.lastOk.ToString('HH:mm') } else { '--:--' }
 
     $countChanged = ($rows.Count -ne $state.lastCount)
@@ -369,7 +379,7 @@ $miCompact = Add-Check 'Compacte rijen' $cfg.compact {
     $state.lastCount = -1
     Save-Cfg; Refresh-Now
 }
-$miOnly = Add-Check 'Alleen aandacht nodig' $cfg.onlyAttention {
+$miOnly = Add-Check 'Alleen aandacht nodig (verbergt de rest)' $cfg.onlyAttention {
     $cfg.onlyAttention = -not $cfg.onlyAttention
     $state.lastCount = -1
     Save-Cfg; Refresh-Now

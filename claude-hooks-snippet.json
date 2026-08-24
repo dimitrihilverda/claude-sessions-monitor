@@ -1,0 +1,22 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\\Users\\dimx\\claude-sessions\\dashboard\\beacon.ps1\"" } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\\Users\\dimx\\claude-sessions\\dashboard\\beacon.ps1\"" } ] }
+    ],
+    "PostToolUse": [
+      { "hooks": [ { "type": "command", "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\\Users\\dimx\\claude-sessions\\dashboard\\beacon.ps1\"" } ] }
+    ],
+    "Notification": [
+      { "hooks": [ { "type": "command", "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\\Users\\dimx\\claude-sessions\\dashboard\\beacon.ps1\"" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\\Users\\dimx\\claude-sessions\\dashboard\\beacon.ps1\"" } ] }
+    ],
+    "SessionEnd": [
+      { "hooks": [ { "type": "command", "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\\Users\\dimx\\claude-sessions\\dashboard\\beacon.ps1\"" } ] }
+    ]
+  }
+}

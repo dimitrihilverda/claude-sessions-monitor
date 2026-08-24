@@ -1,0 +1,6 @@
+# Geen regelovergangen omzetten: de PowerShell-scripts staan bewust in
+# UTF-8 met BOM en CRLF, en daar is PowerShell 5.1 gevoelig voor.
+* -text
+
+*.stl binary
+*.png binary

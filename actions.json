@@ -1,0 +1,37 @@
+{
+  "_uitleg": "Wat de knoppen op de CYD doen. De CYD stuurt alleen het knopnummer; dit bestand bepaalt de betekenis. Aanpassen kan zonder opnieuw te flashen - de API leest het bij elke druk opnieuw.",
+  "token": "",
+  "keyDelayMs": 250,
+  "buttons": {
+    "1": {
+      "label": "Goedkeuren",
+      "type": "keys",
+      "send": "{ENTER}",
+      "requireAttention": true,
+      "_uitleg": "Haalt het venster naar voren en bevestigt de gemarkeerde keuze. Werkt alleen als die sessie echt om aandacht vraagt."
+    },
+    "2": {
+      "label": "Weigeren",
+      "type": "keys",
+      "send": "{ESC}",
+      "requireAttention": true
+    },
+    "3": {
+      "label": "Snooze 10 min",
+      "type": "snooze",
+      "minutes": 10
+    },
+    "4": {
+      "label": "Naar het venster",
+      "type": "focus",
+      "_uitleg": "Knop 4 is de BOOT-knop van de CYD; die kun je tijdens het draaien gewoon gebruiken."
+    }
+  },
+  "_types": {
+    "focus": "venster van de sessie naar voren halen",
+    "keys": "venster naar voren halen en toetsen sturen (SendKeys: {ENTER} {ESC} {TAB} ^c y~ ...)",
+    "snooze": "sessie 'minutes' minuten stil zetten: geen oranje, geen piepje",
+    "run": "programma of commando starten, veld 'command' (+ optioneel 'args'); {cwd} wordt vervangen door de map van de sessie",
+    "open": "map, bestand of url openen, veld 'path' ({cwd} mag)"
+  }
+}

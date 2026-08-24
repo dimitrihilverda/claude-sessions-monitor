@@ -1,0 +1,19 @@
+# Persoonlijke data en werkbestanden -- die horen niet in een repo, ook niet
+# in een private. Ze bevatten je agenda, je inbox en de prompts van je sessies.
+dashboard.html
+sessions.js
+sessions.json
+session-status/
+snooze.json
+actions.log
+hud-config.json
+
+# tijdelijke bestanden van het atomair wegschrijven
+*.tmp
+
+# Windows / editors
+Thumbs.db
+desktop.ini
+.vs/
+.idea/
+__pycache__/

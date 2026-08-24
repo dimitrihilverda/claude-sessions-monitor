@@ -78,6 +78,7 @@ $prevAge    = [double]::MaxValue
 $prevPid    = 0
 $prevStart  = ''
 $prevTitle  = ''
+$prevHost   = 0
 if (Test-Path $file) {
     try {
         $prev       = Get-Content $file -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -86,6 +87,7 @@ if (Test-Path $file) {
         $prevAge    = ((Get-Date) - [datetime]$prev.updated).TotalSeconds
         if ($prev.PSObject.Properties['state'])       { $prevState = [string]$prev.state }
         if ($prev.PSObject.Properties['title'])       { $prevTitle = [string]$prev.title }
+        if ($prev.PSObject.Properties['host_pid'])    { $prevHost  = [int]$prev.host_pid }
         if ($prev.PSObject.Properties['owner_pid'])   { $prevPid   = [int]$prev.owner_pid }
         if ($prev.PSObject.Properties['owner_start']) { $prevStart = [string]$prev.owner_start }
     } catch { }
@@ -135,6 +137,11 @@ if (-not $title -or $ev -eq 'Stop') {
     if ($t) { $title = $t }
 }
 
+# Het venster waarin deze sessie draait. Een keer opzoeken is genoeg; daarna
+# hoeft het dashboard alleen nog de titel van dat venster te lezen.
+$hostPid = $prevHost
+if ($hostPid -le 0 -and $owner.OwnerPid -gt 0) { $hostPid = Get-DashHostPid ([int]$owner.OwnerPid) }
+
 $status = [ordered]@{
     session_id  = $j.session_id
     event       = $ev                  # SessionStart | UserPromptSubmit | PreToolUse | PostToolUse | Notification | Stop | SessionEnd
@@ -146,6 +153,7 @@ $status = [ordered]@{
     message     = $msg                 # bij Notification: waarom er aandacht nodig is
     owner_pid   = $owner.OwnerPid      # PID van het Claude-proces
     owner_start = $owner.Start         # starttijd, tegen hergebruikte PID's
+    host_pid    = $hostPid             # het terminalvenster; daar staat de tabtitel
     updated     = (Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz')
 }
 $status | ConvertTo-Json | Set-Content -Path $file -Encoding UTF8

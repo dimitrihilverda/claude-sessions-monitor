@@ -101,6 +101,54 @@ function Test-DashOwnerAlive($s) {
     return $true
 }
 
+# ---- de tabtitel van de terminal --------------------------------------------
+# Claude Code werkt de titel van zijn terminaltab live bij. Dat is de echte
+# naam van een sessie. Twee beperkingen zijn hier onvermijdelijk:
+#   * alleen een terminal geeft die titel door aan het venster. Draait de sessie
+#     in de PhpStorm-terminal, dan is de venstertitel die van PhpStorm en niet
+#     die van Claude; dan valt hij terug op de transcript-titel.
+#   * staan er meer sessies in hetzelfde terminalvenster (tabs), dan hoort de
+#     venstertitel bij het actieve tabblad. Welke dat is weten we niet, dus dan
+#     gebruiken we hem voor geen van beide.
+$DashTerminals = @(
+    'windowsterminal','openconsole','conhost','cmd','powershell','pwsh','wt',
+    'alacritty','wezterm-gui','mintty','kitty','tabby'
+)
+
+# eerste voorouder met een echt venster; die zetten we in het beacon-bestand
+function Get-DashHostPid([int]$fromPid) {
+    $id = $fromPid
+    for ($i = 0; $i -lt 8 -and $id -gt 4; $i++) {
+        try {
+            $p = Get-Process -Id $id -ErrorAction Stop
+            if ($p.MainWindowHandle -ne [IntPtr]::Zero) { return $id }
+        } catch { }
+        $ci = Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue
+        if (-not $ci) { break }
+        $id = [int]$ci.ParentProcessId
+    }
+    return 0
+}
+
+function Get-DashTabTitle([int]$hostPid) {
+    if ($hostPid -le 0) { return '' }
+    $p = $null
+    try { $p = Get-Process -Id $hostPid -ErrorAction Stop } catch { return '' }
+    if (-not $p) { return '' }
+    if ($DashTerminals -notcontains $p.ProcessName.ToLower()) { return '' }
+
+    $t = ([string]$p.MainWindowTitle -replace '\s+', ' ').Trim()
+    if (-not $t) { return '' }
+    # statusbolletjes en sterretjes die Claude Code ervoor zet weghalen
+    $t = ($t -replace '^[^\p{L}\p{N}]+', '').Trim()
+    if (-not $t) { return '' }
+    # een kale terminalnaam of een pad is geen sessietitel
+    if ($t -match '^(Windows PowerShell|Command Prompt|cmd|cmd\.exe|pwsh|powershell|Terminal)$') { return '' }
+    if ($t -match '^[A-Za-z]:\\') { return '' }
+    if ($t -match '^Administrator:') { $t = ($t -replace '^Administrator:\s*', '') }
+    return (Get-DashShort $t 48)
+}
+
 # ---- de titel van een sessie ------------------------------------------------
 # De mapnaam is geen goede naam: draaien er twee sessies in dezelfde map, dan
 # heten ze allebei hetzelfde. Claude Code houdt zelf een samenvatting bij in het
@@ -119,7 +167,7 @@ function Get-DashTranscript([string]$path, [string]$sessionId) {
     return ''
 }
 
-function Get-DashShort([string]$s, [int]$max = 64) {
+function Get-DashShort([string]$s, [int]$max = 34) {
     $s = ([string]$s -replace '\s+', ' ').Trim()
     if ($s.Length -gt $max) { $s = $s.Substring(0, $max - 1) + '...' }
     return $s
@@ -220,6 +268,10 @@ function Get-DashSessions {
         # titel uit het transcript; valt terug op de mapnaam
         $title = ''
         if ($s.PSObject.Properties['title']) { $title = [string]$s.title }
+
+        $hostPid = 0
+        if ($s.PSObject.Properties['host_pid'] -and $s.host_pid) { $hostPid = [int]$s.host_pid }
+
         $name = if ($title) { $title } else { $folder }
 
         $hidden = $false
@@ -248,6 +300,8 @@ function Get-DashSessions {
             name       = $name
             title      = $title
             folder     = $folder
+            host_pid   = $hostPid
+            tab        = ''
             label      = $(if ($snoozedUntil) { 'Snooze tot ' + $snoozedUntil.ToString('HH:mm') } else { Get-DashStateLabel $state })
             snoozed    = [bool]$snoozedUntil
             why        = $why
@@ -260,6 +314,20 @@ function Get-DashSessions {
             visible    = $visible
             sort_ts    = $upd
         }
+    }
+
+    # De tabtitel van de terminal is de echte naam. Alleen gebruiken als er
+    # precies een zichtbare sessie in dat terminalvenster zit -- bij meerdere
+    # tabs weet je niet bij welke de titel hoort.
+    $perHost = @{}
+    foreach ($x in ($list | Where-Object { $_.visible -and $_.host_pid -gt 0 })) {
+        if (-not $perHost.ContainsKey($x.host_pid)) { $perHost[$x.host_pid] = 0 }
+        $perHost[$x.host_pid] = $perHost[$x.host_pid] + 1
+    }
+    foreach ($x in ($list | Where-Object { $_.visible -and $_.host_pid -gt 0 })) {
+        if ($perHost[$x.host_pid] -ne 1) { continue }
+        $tab = Get-DashTabTitle $x.host_pid
+        if ($tab) { $x.tab = $tab; $x.name = $tab }
     }
 
     # Twee sessies met dezelfde naam (bijvoorbeeld twee keer dezelfde map,
@@ -307,6 +375,7 @@ function Write-DashPayload {
             cwd        = $s.cwd
             name       = $s.name
             folder     = $s.folder
+            tab        = $s.tab
             label      = $s.label
             why        = $s.why
             since      = $s.since

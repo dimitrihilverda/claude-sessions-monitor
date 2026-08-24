@@ -25,15 +25,37 @@ opdracht, wanneer Claude om aandacht vraagt en bij afronden schrijft
 
 ### Hoe een sessie heet
 
-De naam van een sessie is niet de mapnaam maar de **titel die Claude Code zelf
-bijhoudt**. De hook stuurt het pad van het transcript mee; daar staat de
-samenvatting van het gesprek in, en anders pakt de beacon de eerste opdracht.
-Zonder titel (bijvoorbeeld vlak na het starten) valt hij terug op de mapnaam.
-Hebben twee zichtbare sessies toch dezelfde naam, dan komt er een kort stukje
-van hun session_id achter, zodat je ze uit elkaar houdt.
+De naam is de **tabtitel die Claude Code zelf bijwerkt** — dezelfde tekst die je
+in je terminal ziet staan. De beacon legt bij de eerste hook vast in welk
+venster de sessie draait (`host_pid`); daarna leest het dashboard alleen nog de
+titel van dat venster, wat een enkele aanroep per verversing kost.
+
+Twee grenzen zijn onvermijdelijk:
+
+- Alleen een **terminal** geeft die titel door aan de venstertitel. Draait de
+  sessie in de PhpStorm-terminal, dan zet Claude Code wel de tabnaam, maar die
+  leeft binnen de IDE: de venstertitel blijft "project – bestand". Welke
+  programma's meedoen staat in `$DashTerminals` in `sessionlib.ps1`.
+- Zitten er **meer sessies in hetzelfde terminalvenster** (tabbladen), dan hoort
+  de venstertitel bij het actieve tabblad. Welke dat is valt niet te zien, dus
+  dan gebruikt het dashboard de titel voor geen van beide.
+
+Lukt de tabtitel niet, dan is de volgorde: de samenvatting uit het transcript,
+anders de eerste opdracht (afgekapt op 34 tekens), anders de mapnaam. Hebben twee
+zichtbare sessies dan nog dezelfde naam, dan komt er een stukje van hun
+session_id achter.
 
 De map waarin een sessie draait staat in de tweede regel, samen met het tijdstip
 en waar Claude mee bezig is.
+
+Zie je niet de naam die je verwacht, draai dan:
+
+```
+powershell -ExecutionPolicy Bypass -File check-titels.ps1
+```
+
+Dat laat per sessie zien welk venster erbij hoort, wat de venstertitel is en uit
+welke bron de naam komt.
 
 ### Statussen
 

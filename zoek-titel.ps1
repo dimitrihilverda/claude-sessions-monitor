@@ -9,10 +9,45 @@
 #      powershell -ExecutionPolicy Bypass -File zoek-titel.ps1 -SessionId 04240c10-...
 # =============================================================================
 param(
-    [string]$SessionId = ''
+    [string]$SessionId = '',
+    [string]$Naam = ''        # de naam die je zelf aan de sessie hebt gegeven
 )
 $ErrorActionPreference = 'Continue'
 $claude = Join-Path $env:USERPROFILE '.claude'
+$appdat = Join-Path $env:APPDATA 'Claude'
+
+# ---- 0. zoeken op de naam zelf ---------------------------------------------
+# Dit is de snelste route: heb je de sessie een naam gegeven, dan staat die
+# letterlijk in een bestand en zien we meteen waar.
+if ($Naam) {
+    Write-Host "== zoeken naar '$Naam'" -ForegroundColor Cyan
+    $iets = $false
+    foreach ($wortel in @($claude, $appdat)) {
+        if (-not (Test-Path $wortel)) { continue }
+        Get-ChildItem $wortel -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Length -lt 60mb -and $_.FullName -notlike '*\node_modules\*' } |
+            ForEach-Object {
+                try {
+                    $hit = Select-String -LiteralPath $_.FullName -Pattern $Naam -SimpleMatch -ErrorAction Stop |
+                           Select-Object -First 1
+                    if ($hit) {
+                        $iets = $true
+                        Write-Host ("  -- " + $_.FullName) -ForegroundColor Green
+                        $regel = [string]$hit.Line
+                        # alleen het stuk rond de naam tonen, anders wordt het onleesbaar
+                        $i = $regel.IndexOf($Naam)
+                        $van = [Math]::Max(0, $i - 160)
+                        $tot = [Math]::Min($regel.Length, $i + $Naam.Length + 160)
+                        Write-Host ("     regel " + $hit.LineNumber + ": ..." + $regel.Substring($van, $tot - $van) + "...")
+                    }
+                } catch { }
+            }
+    }
+    if (-not $iets) {
+        Write-Host "  (niets gevonden -- klopt de spelling precies? hoofdletters maken niet uit)" -ForegroundColor DarkYellow
+    }
+    Write-Host ""
+}
 
 # ---- welke sessie? ----------------------------------------------------------
 if (-not $SessionId) {

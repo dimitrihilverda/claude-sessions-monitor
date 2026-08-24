@@ -94,15 +94,18 @@ function Get-DashProcChain([int]$startPid) {
 
 # Alle vensters met een score > 0, hoogste eerst.
 function Get-DashWindowCandidates {
-    param([string]$Cwd, [int]$OwnerPid = 0)
+    param([string]$Cwd, [int]$OwnerPid = 0, [int]$HostPid = 0)
 
     $leaf = ''
     if ($Cwd) { try { $leaf = Split-Path -Leaf $Cwd } catch { } }
     $cwdLow  = ([string]$Cwd).ToLower()
     $leafLow = ([string]$leaf).ToLower()
 
+    # De ouderketen begint bij het Claude-proces; kennen we dat niet, dan bij
+    # het venster dat de beacon heeft vastgelegd.
     $chain = @()
-    if ($OwnerPid -gt 0) { $chain = Get-DashProcChain $OwnerPid }
+    if     ($OwnerPid -gt 0) { $chain = Get-DashProcChain $OwnerPid }
+    elseif ($HostPid  -gt 0) { $chain = Get-DashProcChain $HostPid }
 
     $out = @()
     try {
@@ -112,6 +115,7 @@ function Get-DashWindowCandidates {
             $t = $w.Title.ToLower()
 
             $score = 0
+            if ($HostPid -gt 0 -and $w.Pid -eq $HostPid) { $score += 120 }  # het venster uit de beacon
             if ($chain -contains $w.Pid)                 { $score += 100 }  # hoort bij deze sessie
             if     ($cwdLow  -and $t.Contains($cwdLow))  { $score += 45  }  # volledig pad in de titel
             elseif ($leafLow -and $t.Contains($leafLow)) { $score += 30  }  # projectnaam in de titel
@@ -129,8 +133,8 @@ function Get-DashWindowCandidates {
 }
 
 function Get-DashBestWindow {
-    param([string]$Cwd, [int]$OwnerPid = 0, [int]$MinScore = 30)
-    $c = @(Get-DashWindowCandidates -Cwd $Cwd -OwnerPid $OwnerPid)
+    param([string]$Cwd, [int]$OwnerPid = 0, [int]$HostPid = 0, [int]$MinScore = 30)
+    $c = @(Get-DashWindowCandidates -Cwd $Cwd -OwnerPid $OwnerPid -HostPid $HostPid)
     if ($c.Count -and $c[0].Score -ge $MinScore) { return $c[0] }
     return $null
 }
@@ -152,7 +156,9 @@ function Show-DashWindow {
 function Invoke-DashSessionFocus {
     param($Session, [switch]$FolderFallback)
 
-    $best = Get-DashBestWindow -Cwd ([string]$Session.cwd) -OwnerPid ([int]$Session.owner_pid)
+    $hostPid = 0
+    if ($Session.PSObject.Properties['host_pid'] -and $Session.host_pid) { $hostPid = [int]$Session.host_pid }
+    $best = Get-DashBestWindow -Cwd ([string]$Session.cwd) -OwnerPid ([int]$Session.owner_pid) -HostPid $hostPid
     if ($best) {
         [void](Show-DashWindow -Handle $best.Handle)
         return $best

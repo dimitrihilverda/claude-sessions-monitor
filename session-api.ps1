@@ -153,7 +153,7 @@ function Invoke-DashAction($sess, [string]$btn) {
 
     switch ($type) {
         'focus' {
-            $w = Invoke-DashSessionFocus -Session $sess -FolderFallback
+            $w = Invoke-DashSessionFocus -Session $sess
             if ($w) { Write-DashLog "$label -> $name : $($w.Title)"; return "ok $label" }
             Write-DashLog "$label -> $name : geen venster gevonden"
             return 'err geen venster'
@@ -282,7 +282,7 @@ while ($true) {
                     if (-not $sess) {
                         $body = 'err geen sessie'
                     } elseif ($path -eq '/focus') {
-                        $w = Invoke-DashSessionFocus -Session $sess -FolderFallback
+                        $w = Invoke-DashSessionFocus -Session $sess
                         if ($w) {
                             Write-DashLog "TIK -> $($sess.name) : $($w.Title)"
                             $body = "ok $($sess.name)"

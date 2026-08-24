@@ -95,7 +95,15 @@ function Show-SessionWindow($sess, [switch]$Explain) {
         return
     }
 
-    [void](Invoke-DashSessionFocus -Session $sess -FolderFallback)
+    # Geen verkenner meer als terugval: je klikte op een sessie, niet op een map.
+    # Lukt het niet, zeg dat dan gewoon -- shift+klik opent de map wel.
+    $w = Invoke-DashSessionFocus -Session $sess
+    if (-not $w) {
+        try {
+            $tray.ShowBalloonTip(4000, 'Geen venster gevonden',
+                "Voor '$($sess.name)' is geen venster te vinden. Shift+klik opent de map.", 'Info')
+        } catch { }
+    }
 }
 
 # ---- het venster ------------------------------------------------------------

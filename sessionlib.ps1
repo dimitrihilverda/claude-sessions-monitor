@@ -120,6 +120,19 @@ $DashTerminals = @(
 # een label ervoor.
 $DashDesktopHosts = @('claude')
 
+# Een beacon van een Cowork-sessie kan zonder proces-ID zijn geschreven. Dan
+# zoeken we het venster van de desktopapp er zelf bij, zodat klikken op zo'n
+# sessie ook gewoon werkt.
+function Get-DashDesktopPid {
+    foreach ($naam in $DashDesktopHosts) {
+        $p = Get-Process -Name $naam -ErrorAction SilentlyContinue |
+             Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero } |
+             Select-Object -First 1
+        if ($p) { return [int]$p.Id }
+    }
+    return 0
+}
+
 # eerste voorouder met een echt venster; die zetten we in het beacon-bestand
 function Get-DashHostPid([int]$fromPid) {
     $id = $fromPid
@@ -318,6 +331,9 @@ function Get-DashSessions {
 
         $hostPid = 0
         if ($s.PSObject.Properties['host_pid'] -and $s.host_pid) { $hostPid = [int]$s.host_pid }
+        $bron = ''
+        if ($s.PSObject.Properties['source']) { $bron = [string]$s.source }
+        if ($hostPid -le 0 -and $bron -eq 'cowork') { $hostPid = Get-DashDesktopPid }
 
         $name = if ($title) { $title } else { $folder }
 
@@ -348,6 +364,7 @@ function Get-DashSessions {
             title      = $title
             folder     = $folder
             host_pid   = $hostPid
+            source     = $bron
             tab        = ''
             host       = ''
             label      = $(if ($snoozedUntil) { 'Snooze tot ' + $snoozedUntil.ToString('HH:mm') } else { Get-DashStateLabel $state })
@@ -437,6 +454,8 @@ function Write-DashPayload {
             cwd        = $s.cwd
             name       = $s.name
             folder     = $s.folder
+            host_pid   = $s.host_pid
+            owner_pid  = $s.owner_pid
             tab        = $s.tab
             label      = $s.label
             why        = $s.why

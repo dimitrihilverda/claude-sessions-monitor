@@ -143,7 +143,7 @@ powershell -ExecutionPolicy Bypass -File hud.ps1
 | Actie | Wat het doet |
 |---|---|
 | Slepen met links | venster verplaatsen (positie wordt bewaard in `hud-config.json`) |
-| Klik op een rij | haalt het venster van die sessie naar voren |
+| Klik op een rij | haalt het venster van die sessie naar voren; lukt dat niet, dan zegt hij dat in een ballontip |
 | Shift + klik | opent de projectmap in Verkenner |
 | Ctrl + klik | laat zien welke vensters de HUD vond en met welke score — voor als hij het verkeerde venster pakt |
 | Rechtermuis | menu: altijd bovenop, compacte rijen, alleen aandacht nodig, dashboard openen, starten bij inloggen, herstarten, afsluiten |

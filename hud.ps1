@@ -155,6 +155,21 @@ $state = [ordered]@{
 $HeadH = 30
 function Get-RowH { if ($cfg.compact) { return 30 } else { return 46 } }
 
+# Alleen de opgegeven rijen opnieuw laten tekenen. De tekenroutine loopt nog
+# steeds alle rijen langs -- dat moet ook, want daar worden de klikvlakken
+# opnieuw opgebouwd -- maar Windows knipt alles buiten deze rechthoeken weg.
+function Invalidate-Rijen($indexen) {
+    $iets = $false
+    foreach ($i in $indexen) {
+        if ($null -eq $i) { continue }
+        if ($i -lt 0 -or $i -ge @($state.hitboxes).Count) { continue }
+        $r = $state.hitboxes[$i].Rect
+        $form.Invalidate((New-Object System.Drawing.Rectangle $r.X, $r.Y, $r.Width, $r.Height))
+        $iets = $true
+    }
+    if (-not $iets) { $form.Invalidate() }
+}
+
 function Update-Layout {
     $n = [Math]::Max(1, @($state.rows).Count)
     $h = $HeadH + ($n * (Get-RowH)) + 24
@@ -462,12 +477,19 @@ $form.Add_MouseMove({
         $i++
     }
     if ($idx -ne $state.hover) {
+        $oud = $state.hover
         $state.hover = $idx
         $form.Cursor = if ($idx -ge 0) { [System.Windows.Forms.Cursors]::Hand } else { [System.Windows.Forms.Cursors]::Default }
-        $form.Invalidate()
+        # Alleen de twee betrokken rijen opnieuw laten tekenen. Het hele venster
+        # ongeldig verklaren gaf bij elke muisbeweging een korte flikkering.
+        Invalidate-Rijen @($oud, $idx)
     }
 })
-$form.Add_MouseLeave({ $state.hover = -1; $form.Invalidate() })
+$form.Add_MouseLeave({
+    $oud = $state.hover
+    $state.hover = -1
+    Invalidate-Rijen @($oud)
+})
 $form.Add_KeyDown({
     param($s, $e)
     if ($e.KeyCode -eq 'Escape') { $form.Visible = $false }

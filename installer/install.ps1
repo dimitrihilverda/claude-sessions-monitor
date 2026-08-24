@@ -76,7 +76,8 @@ Kop 'Bestanden neerzetten'
 New-Item -ItemType Directory -Force -Path $Doel | Out-Null
 
 $kern = @('sessionlib.ps1', 'focuslib.ps1', 'beacon.ps1', 'hud.ps1', 'hud.vbs',
-          'check-titels.ps1', 'zoek-titel.ps1', 'uninstall.ps1', 'LEESMIJ.md')
+          'check-titels.ps1', 'zoek-titel.ps1', 'diagnose.ps1', 'Diagnose.cmd',
+          'uninstall.ps1', 'LEESMIJ.md')
 $touch = @('session-api.ps1', 'api.vbs', 'actions.json')
 
 foreach ($f in $kern) {

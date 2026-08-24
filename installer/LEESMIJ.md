@@ -57,6 +57,18 @@ behuizing staan in `cyd\` en `case\`. Wat de drie fysieke toetsen doen bepaal
 je in `actions.json` — dat leest de service bij elke druk opnieuw, dus omzetten
 kan zonder opnieuw te flashen.
 
+## De HUD laat niets zien
+
+Dat is bijna altijd hetzelfde: **hooks worden ingelezen als een sessie start**.
+Alles wat al draaide toen je installeerde, meldt zich niet. Sluit die sessies af
+en start een nieuwe, geef er een opdracht, en de HUD vult zich.
+
+Blijft het leeg, dubbelklik dan **`Diagnose.cmd`**. Die loopt de hele keten na —
+bestanden, hooks in `settings.json`, een echte proefaanroep van de beacon, de
+statusbestanden en de HUD zelf — en zegt waar het misgaat. Twee dingen die hij
+vaak vindt: het filter "alleen aandacht nodig" dat aan staat, of hooks die nog
+naar een oude installatiemap wijzen.
+
 ## Als een naam niet klopt
 
 De naam van een sessie komt uit het transcript van Claude Code: eerst een naam

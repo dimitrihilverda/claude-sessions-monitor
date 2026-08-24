@@ -115,6 +115,11 @@ $DashTerminals = @(
     'alacritty','wezterm-gui','mintty','kitty','tabby'
 )
 
+# De Claude-desktopapp (Cowork) hangt ook aan een venster, maar dat heet altijd
+# gewoon "Claude". Die titel zegt niets, dus die sessies krijgen hun mapnaam met
+# een label ervoor.
+$DashDesktopHosts = @('claude')
+
 # eerste voorouder met een echt venster; die zetten we in het beacon-bestand
 function Get-DashHostPid([int]$fromPid) {
     $id = $fromPid
@@ -130,14 +135,18 @@ function Get-DashHostPid([int]$fromPid) {
     return 0
 }
 
-function Get-DashTabTitle([int]$hostPid) {
-    if ($hostPid -le 0) { return '' }
-    $p = $null
-    try { $p = Get-Process -Id $hostPid -ErrorAction Stop } catch { return '' }
-    if (-not $p) { return '' }
-    if ($DashTerminals -notcontains $p.ProcessName.ToLower()) { return '' }
+function Get-DashHostInfo([int]$hostPid) {
+    if ($hostPid -le 0) { return $null }
+    try { $p = Get-Process -Id $hostPid -ErrorAction Stop } catch { return $null }
+    if (-not $p) { return $null }
+    return [pscustomobject]@{
+        Name  = $p.ProcessName.ToLower()
+        Title = [string]$p.MainWindowTitle
+    }
+}
 
-    $t = ([string]$p.MainWindowTitle -replace '\s+', ' ').Trim()
+function Get-DashCleanTab([string]$raw) {
+    $t = ([string]$raw -replace '\s+', ' ').Trim()
     if (-not $t) { return '' }
     # statusbolletjes en sterretjes die Claude Code ervoor zet weghalen
     $t = ($t -replace '^[^\p{L}\p{N}]+', '').Trim()
@@ -147,6 +156,13 @@ function Get-DashTabTitle([int]$hostPid) {
     if ($t -match '^[A-Za-z]:\\') { return '' }
     if ($t -match '^Administrator:') { $t = ($t -replace '^Administrator:\s*', '') }
     return (Get-DashShort $t 48)
+}
+
+function Get-DashTabTitle([int]$hostPid) {
+    $info = Get-DashHostInfo $hostPid
+    if (-not $info) { return '' }
+    if ($DashTerminals -notcontains $info.Name) { return '' }
+    return (Get-DashCleanTab $info.Title)
 }
 
 # ---- de titel van een sessie ------------------------------------------------
@@ -302,6 +318,7 @@ function Get-DashSessions {
             folder     = $folder
             host_pid   = $hostPid
             tab        = ''
+            host       = ''
             label      = $(if ($snoozedUntil) { 'Snooze tot ' + $snoozedUntil.ToString('HH:mm') } else { Get-DashStateLabel $state })
             snoozed    = [bool]$snoozedUntil
             why        = $why
@@ -326,8 +343,17 @@ function Get-DashSessions {
     }
     foreach ($x in ($list | Where-Object { $_.visible -and $_.host_pid -gt 0 })) {
         if ($perHost[$x.host_pid] -ne 1) { continue }
-        $tab = Get-DashTabTitle $x.host_pid
-        if ($tab) { $x.tab = $tab; $x.name = $tab }
+        $info = Get-DashHostInfo $x.host_pid
+        if (-not $info) { continue }
+        $x.host = $info.Name
+        if ($DashTerminals -contains $info.Name) {
+            $tab = Get-DashCleanTab $info.Title
+            if ($tab) { $x.tab = $tab; $x.name = $tab }
+        } elseif ($DashDesktopHosts -contains $info.Name) {
+            # Cowork-sessie: het venster heet "Claude", dus daar valt niets uit
+            # te halen. Wel duidelijk maken dat het geen terminalsessie is.
+            if (-not $x.title) { $x.name = 'Cowork · ' + $x.folder }
+        }
     }
 
     # Twee sessies met dezelfde naam (bijvoorbeeld twee keer dezelfde map,

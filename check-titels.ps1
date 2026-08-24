@@ -39,10 +39,17 @@ foreach ($s in $zicht) {
     Write-Host ("  venstertitel: " + $(if ($venster) { $venster } else { '(leeg)' }))
     Write-Host ("  transcript  : " + $(if ($s.title) { $s.title } else { '(nog niets)' }))
 
-    if (-not $s.tab -and $s.host_pid -gt 0 -and ($DashTerminals -notcontains $procNaam.ToLower())) {
-        Write-Host ("  -> " + $procNaam + " geeft de tabnaam van Claude niet door aan de venstertitel.") -ForegroundColor DarkYellow
-        Write-Host ("     Zet die sessie in Windows Terminal, of vul " + '$DashTerminals' + " aan in sessionlib.ps1") -ForegroundColor DarkYellow
-        Write-Host ("     als jouw terminal dat wel doet.") -ForegroundColor DarkYellow
+    if (-not $s.tab -and $s.host_pid -gt 0) {
+        $pn = $procNaam.ToLower()
+        if ($DashDesktopHosts -contains $pn) {
+            Write-Host "  -> Cowork-sessie: dat venster heet altijd 'Claude', daar zit geen titel in." -ForegroundColor DarkGray
+        } elseif ($DashTerminals -contains $pn) {
+            Write-Host "  -> Terminal gevonden, maar de titel was leeg of te generiek." -ForegroundColor DarkYellow
+        } else {
+            Write-Host ("  -> " + $procNaam + " houdt de tabnaam van Claude binnen zijn eigen vensters.") -ForegroundColor DarkYellow
+            Write-Host "     Bij een IDE-terminal is die niet uit te lezen; daarom de transcript-titel." -ForegroundColor DarkYellow
+            Write-Host ("     Is dit toch een terminal, zet hem dan in " + '$DashTerminals' + " in sessionlib.ps1.") -ForegroundColor DarkYellow
+        }
     }
 }
 Write-Host ""

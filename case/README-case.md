@@ -4,8 +4,9 @@ Twee varianten, allebei uit hetzelfde script. Kies er één:
 
 | | **deck-plat** | **deck-compact** |
 |---|---|---|
-| buitenmaat | 94,5 × 103,3 × **29,5** mm | 94,5 × 88,9 × 47,6 mm |
-| hellingshoek | 11° | 26° |
+| buitenmaat | 94,5 × 103,8 × **29,4** mm | 94,5 × 89,1 × 50,1 mm |
+| hellingshoek | 9° | 26° |
+| voorrand | 14,6 mm | 9,2 mm |
 | achterkant | 20° uit het lood, loopt weg | 6°, vrijwel recht |
 | karakter | vlak plankje, blijft laag in beeld | duidelijke wig, kleinere voetafdruk |
 
@@ -26,10 +27,30 @@ ongeveer 4 mm.
 |---|---|
 | `deck-plat-shell-print.stl` | de behuizing, al goed gedraaid voor de printer |
 | `deck-plat-shell.stl` | dezelfde, rechtop (handig om te bekijken) |
+| `deck-plat-bodem.stl` | de grondplaat — **1×** |
 | `deck-plat-brace.stl` | klembalkje dat de print vasthoudt — **1×** |
 | `deck-compact-*.stl` | idem voor de steilere variant |
 | `make_case.py` | de generator; alle maten staan bovenin |
-| `preview.png` | beide varianten van drie kanten |
+| `preview.png` | aanzichten, onderkant, losse delen en een doorsnede |
+
+## De grondplaat
+
+De onderranden zijn bewust níet afgerond: de plaat sluit vlak aan. Hij valt in
+de onderkant, verdwijnt helemaal in de behuizing (de hoogte blijft dus 29,4 mm)
+en schroeft met vier M3-schroeven vast in vier klossen in de hoeken. De
+schroefkoppen zijn verzonken, dus de onderkant blijft vlak.
+
+Plaatmaat: 89,0 × 98,2 × 2,5 mm. Speling rondom is 0,35 mm; schuurt hij, verhoog
+dan `PLATE_CLR` en draai het script opnieuw.
+
+Ik heb geen klik-verbinding gemaakt maar schroeven, en dat is een keuze: een
+snapverbinding over zo'n grote omtrek moet je inpassen met proefprints, en dat
+kan ik hier niet doen. Schroeven werken de eerste keer.
+
+Let op de wisselwerking die dit oplevert: een dichte bodem kost hoogte, want de
+MX-schakelaars steken aan de voorkant naar beneden en moeten nu boven de
+grondplaat blijven. Daarom is de vlakke variant van 11° naar 9° gegaan. Met
+`SWITCH = "CHOC"` verdwijnt dat probleem — die hebben maar 7 mm nodig.
 
 ## Hoe de print vastzit
 
@@ -70,7 +91,8 @@ Een brim helpt tegen loslaten.
 ## Wat je erbij nodig hebt
 
 - 3× MX-schakelaar (of Choc, als je `SWITCH` omzet) + keycaps
-- 2× zelftappende schroef M3 × 10 (de gaten zijn 2,6 mm en snijden hun eigen draad)
+- 6× zelftappende schroef M3 × 10 — twee voor het klembalkje, vier voor de
+  grondplaat (de voorgaten zijn 2,6 mm en snijden hun eigen draad)
 - 1× weerstand 10 kΩ
 - dun draad, en bij voorkeur twee JST 1.25 mm 4-pins pigtails
 
@@ -99,6 +121,5 @@ moet je vanaf blijven.
 4. Het klembalkje over de onderrand leggen — opstaand randje naar de print toe —
    en vastschroeven. Niet te strak.
 5. USB-kabel door de sleuf in de linkerwand.
-
-De onderkant blijft open: makkelijk bij de bedrading, en er kunnen vier rubber
-dopjes onder.
+6. Grondplaat erin leggen en met vier schroeven vastzetten. Vier rubber dopjes
+   eronder en hij schuift niet meer weg.

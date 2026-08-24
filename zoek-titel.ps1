@@ -13,6 +13,7 @@ param(
     [string]$Naam = ''        # de naam die je zelf aan de sessie hebt gegeven
 )
 $ErrorActionPreference = 'Continue'
+. (Join-Path $PSScriptRoot 'sessionlib.ps1')
 $claude = Join-Path $env:USERPROFILE '.claude'
 $appdat = Join-Path $env:APPDATA 'Claude'
 
@@ -40,7 +41,12 @@ if ($Naam) {
                         $tot = [Math]::Min($regel.Length, $i + $Naam.Length + 160)
                         Write-Host ("     regel " + $hit.LineNumber + ": ..." + $regel.Substring($van, $tot - $van) + "...")
                     }
-                } catch { }
+                } catch {
+                    # niet stil doorgaan: op grote bestanden met extreem lange
+                    # regels loopt Select-String stuk, en dan lijkt het alsof de
+                    # naam nergens staat
+                    Write-Host ("  !! kon " + $_.Name + " niet doorzoeken: " + $_.Exception.Message) -ForegroundColor DarkYellow
+                }
             }
     }
     if (-not $iets) {
@@ -81,13 +87,17 @@ if (-not $tr) {
         Write-Host "     $k"
     }
 
-    Write-Host "   regels met title/name/summary erin (eerste 6), ingekort:"
-    $tn = $regels | Where-Object { $_ -match '"(title|name|summary|customName|displayName)"\s*:' } | Select-Object -First 6
+    Write-Host "   de titelregels (custom-title / ai-title / summary), laatste 6:"
+    $tn = $regels | Where-Object { $_ -match '"type"\s*:\s*"(custom-title|ai-title|summary)"' } |
+          Select-Object -Last 6
     if (-not $tn) { Write-Host "     (geen)" }
     foreach ($r in $tn) {
-        $k = $r; if ($k.Length -gt 300) { $k = $k.Substring(0, 300) + ' ...' }
-        Write-Host "     $k"
+        $k = $r; if ($k.Length -gt 400) { $k = $k.Substring(0, 400) + ' ...' }
+        Write-Host "     $k" -ForegroundColor Green
     }
+
+    Write-Host "   wat het dashboard hieruit maakt:"
+    Write-Host ("     " + (Get-DashTitle $tr.FullName $SessionId)) -ForegroundColor Green
 }
 
 # ---- 2. losse bestanden in .claude ------------------------------------------

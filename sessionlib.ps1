@@ -193,21 +193,53 @@ function Get-DashTitle([string]$path, [string]$sessionId) {
     $file = Get-DashTranscript $path $sessionId
     if (-not $file) { return '' }
 
-    # 1. de samenvatting van Claude Code zelf; de laatste is de actueelste
-    $sum = ''
+    # Claude Code schrijft de naam van een sessie als losse regels in het
+    # transcript. Drie soorten, in deze voorkeursvolgorde:
+    #   custom-title  jouw eigen naam (de rename-functie)  -- wint altijd
+    #   ai-title      de titel die Claude Code zelf bijhoudt en blijft bijwerken
+    #   summary       de samenvatting na een /compact of bij hervatten
+    # We nemen van elk soort de laatste; renamen doe je immers achteraf.
+    # Het veld waarin de tekst staat kan per versie verschillen, dus we pakken
+    # het eerste veld uit deze lijst dat een niet-lege tekst bevat.
+    $velden = @('title','customTitle','aiTitle','name','text','value','content','summary')
+    $custom = ''
+    $ai     = ''
+    $sum    = ''
+
     try {
-        foreach ($line in (Get-Content -LiteralPath $file -Tail 120 -Encoding UTF8 -ErrorAction Stop)) {
-            if ($line -notmatch '"type"\s*:\s*"summary"') { continue }
+        foreach ($line in (Get-Content -LiteralPath $file -Tail 1500 -Encoding UTF8 -ErrorAction Stop)) {
+            if ($line -notmatch '"type"\s*:\s*"(custom-title|ai-title|summary)"') { continue }
+            $soort = $Matches[1]
+            $o = $null
             try { $o = $line | ConvertFrom-Json } catch { continue }
-            if ($o.summary) { $sum = [string]$o.summary }
+            if (-not $o) { continue }
+
+            $waarde = ''
+            foreach ($v in $velden) {
+                if ($o.PSObject.Properties[$v]) {
+                    $kandidaat = $o.$v
+                    if ($kandidaat -is [string] -and $kandidaat) { $waarde = [string]$kandidaat; break }
+                }
+            }
+            if (-not $waarde) { continue }
+
+            switch ($soort) {
+                'custom-title' { $custom = $waarde }
+                'ai-title'     { $ai     = $waarde }
+                'summary'      { $sum    = $waarde }
+            }
         }
     } catch { }
-    if ($sum) { return (Get-DashShort $sum) }
 
-    # 2. anders de eerste echte opdracht uit het gesprek
+    if ($custom) { return (Get-DashShort $custom 48) }
+    if ($ai)     { return (Get-DashShort $ai 48) }
+    if ($sum)    { return (Get-DashShort $sum 48) }
+
+    # Niets van dat al: dan de eerste echte opdracht uit het gesprek.
     try {
         foreach ($line in (Get-Content -LiteralPath $file -TotalCount 40 -Encoding UTF8 -ErrorAction Stop)) {
             if ($line -notmatch '"type"\s*:\s*"user"') { continue }
+            $o = $null
             try { $o = $line | ConvertFrom-Json } catch { continue }
             $c = $o.message.content
             $t = ''
@@ -216,7 +248,6 @@ function Get-DashTitle([string]$path, [string]$sessionId) {
                 foreach ($b in $c) { if ($b.type -eq 'text' -and $b.text) { $t = [string]$b.text; break } }
             }
             if (-not $t) { continue }
-            # systeemregels en slash-commando's overslaan
             if ($t -match '^\s*<' -or $t -match 'command-name' -or $t -match '^\s*Caveat:') { continue }
             return (Get-DashShort $t)
         }
@@ -348,7 +379,12 @@ function Get-DashSessions {
         $x.host = $info.Name
         if ($DashTerminals -contains $info.Name) {
             $tab = Get-DashCleanTab $info.Title
-            if ($tab) { $x.tab = $tab; $x.name = $tab }
+            # de titel uit het transcript is specifieker (daar zit je rename in),
+            # dus de tabtitel vult alleen aan waar die ontbreekt
+            if ($tab) {
+                $x.tab = $tab
+                if (-not $x.title) { $x.name = $tab }
+            }
         } elseif ($DashDesktopHosts -contains $info.Name) {
             # Cowork-sessie: het venster heet "Claude", dus daar valt niets uit
             # te halen. Wel duidelijk maken dat het geen terminalsessie is.

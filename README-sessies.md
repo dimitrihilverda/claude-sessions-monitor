@@ -25,37 +25,45 @@ opdracht, wanneer Claude om aandacht vraagt en bij afronden schrijft
 
 ### Hoe een sessie heet
 
-De naam is de **tabtitel die Claude Code zelf bijwerkt** — dezelfde tekst die je
-in je terminal ziet staan. De beacon legt bij de eerste hook vast in welk
-venster de sessie draait (`host_pid`); daarna leest het dashboard alleen nog de
-titel van dat venster, wat een enkele aanroep per verversing kost.
+Claude Code schrijft de naam van een sessie als losse regels in het transcript,
+en de hook stuurt het pad van dat transcript mee. Er zijn drie soorten, en de
+beacon neemt van elk de laatste:
 
-Twee grenzen zijn onvermijdelijk:
+| Regeltype | Wat het is |
+|---|---|
+| `custom-title` | de naam die je zelf hebt gegeven met de rename-functie — wint altijd |
+| `ai-title` | de titel die Claude Code zelf bijhoudt en tijdens het werk blijft bijwerken |
+| `summary` | de samenvatting na een `/compact` of bij het hervatten van een sessie |
 
-- Alleen een **terminal** geeft die titel door aan de venstertitel. Draait de
-  sessie in de PhpStorm-terminal, dan zet Claude Code wel de tabnaam, maar die
-  leeft binnen de IDE: de venstertitel blijft "project – bestand". Welke
-  programma's meedoen staat in `$DashTerminals` in `sessionlib.ps1`.
-- Zitten er **meer sessies in hetzelfde terminalvenster** (tabbladen), dan hoort
-  de venstertitel bij het actieve tabblad. Welke dat is valt niet te zien, dus
-  dan gebruikt het dashboard de titel voor geen van beide.
+Het veld waarin die tekst staat kan per versie van Claude Code verschillen, dus
+de beacon pakt het eerste veld met een niet-lege tekst uit `title`,
+`customTitle`, `aiTitle`, `name`, `text`, `value`, `content` of `summary`.
+Verandert dat in een toekomstige versie, dan is het één regel bijwerken in
+`$velden` in `sessionlib.ps1`.
 
-Lukt de tabtitel niet, dan is de volgorde: de samenvatting uit het transcript,
-anders de eerste opdracht (afgekapt op 34 tekens), anders de mapnaam. Hebben twee
-zichtbare sessies dan nog dezelfde naam, dan komt er een stukje van hun
-session_id achter.
+Levert dat allemaal niets op, dan is de volgorde: de tabtitel van de terminal
+(alleen bij een echte terminal — een IDE houdt die tabnaam binnen zijn eigen
+vensters), dan de eerste opdracht uit het gesprek afgekapt op 34 tekens, en
+anders de mapnaam. Cowork-sessies hangen aan een venster dat altijd "Claude"
+heet; die krijgen `Cowork · <map>`.
 
-De map waarin een sessie draait staat in de tweede regel, samen met het tijdstip
-en waar Claude mee bezig is.
+De titel wordt één keer opgezocht en bewaard in het beacon-bestandje. Bij elke
+`Stop` kijkt de beacon opnieuw, want dan kan er net een nieuwe `ai-title` of een
+rename bij zijn gekomen.
 
-Zie je niet de naam die je verwacht, draai dan:
+Hebben twee zichtbare sessies dezelfde naam, dan komt er een stukje van hun
+session_id achter zodat je ze uit elkaar houdt. De map staat in de tweede regel,
+samen met het tijdstip en waar Claude mee bezig is.
+
+Twee hulpscripts als een naam je niet bevalt:
 
 ```
 powershell -ExecutionPolicy Bypass -File check-titels.ps1
+powershell -ExecutionPolicy Bypass -File zoek-titel.ps1 -SessionId <id>
 ```
 
-Dat laat per sessie zien welk venster erbij hoort, wat de venstertitel is en uit
-welke bron de naam komt.
+De eerste laat per sessie zien welke bron gebruikt wordt. De tweede dumpt de
+titelregels uit een transcript en laat zien wat het dashboard daarvan maakt.
 
 ### Statussen
 

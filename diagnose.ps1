@@ -105,9 +105,12 @@ if (-not (Test-Path $Status)) {
     $b = @(Get-ChildItem $Status -Filter '*.json' -File -ErrorAction SilentlyContinue)
     if (-not $b.Count) {
         NIET 'nog geen enkele sessie heeft zich gemeld'
-        INFO 'Hooks gelden pas vanaf de volgende keer dat je een sessie start.'
-        INFO 'Sluit je draaiende Claude Code-sessies af en start er een nieuwe;'
-        INFO 'geef daarin een opdracht en draai deze diagnose opnieuw.'
+        INFO 'Hooks worden ingelezen als een sessie start, niet daarna.'
+        INFO ' * terminal: sluit je draaiende Claude Code-sessies af en start een nieuwe'
+        INFO ' * desktop-app: sluit Claude helemaal af, ook uit het systeemvak naast'
+        INFO '   de klok, en start hem opnieuw. Een nieuwe chat in een app die al'
+        INFO '   draaide gebruikt nog de instellingen van toen de app startte.'
+        INFO 'Geef daarna een opdracht en draai deze diagnose opnieuw.'
     } else {
         OK "$($b.Count) statusbestand(en) gevonden"
         foreach ($f in ($b | Sort-Object LastWriteTime -Descending | Select-Object -First 6)) {
@@ -142,8 +145,10 @@ if (Test-Path $cfgPad) {
 Write-Host ''
 if ($fout -eq 0) {
     Write-Host "  Alles in orde ($goed controles)." -ForegroundColor Green
-    Write-Host '  Zie je toch niets, start dan een nieuwe Claude Code-sessie:' -ForegroundColor Green
-    Write-Host '  sessies die al draaiden kennen de hooks nog niet.' -ForegroundColor Green
+    Write-Host '  Zie je toch niets, dan draaide die sessie al voordat de hooks' -ForegroundColor Green
+    Write-Host '  erin stonden. Start de terminalsessie opnieuw, of sluit de' -ForegroundColor Green
+    Write-Host '  Claude-desktopapp helemaal af (ook uit het systeemvak) en start' -ForegroundColor Green
+    Write-Host '  hem opnieuw -- een nieuwe chat in een draaiende app is niet genoeg.' -ForegroundColor Green
 } else {
     Write-Host "  $fout probleem(en) gevonden, $goed controles in orde." -ForegroundColor Red
 }

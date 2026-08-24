@@ -59,9 +59,15 @@ kan zonder opnieuw te flashen.
 
 ## De HUD laat niets zien
 
-Dat is bijna altijd hetzelfde: **hooks worden ingelezen als een sessie start**.
-Alles wat al draaide toen je installeerde, meldt zich niet. Sluit die sessies af
-en start een nieuwe, geef er een opdracht, en de HUD vult zich.
+Dat is bijna altijd hetzelfde: **hooks worden ingelezen als een sessie start**,
+niet daarna. Alles wat al draaide toen je installeerde, meldt zich niet.
+
+- **Terminal**: sluit die Claude Code-sessies af en start een nieuwe.
+- **Desktop-app**: sluit Claude helemaal af, ook uit het systeemvak naast de
+  klok, en start hem opnieuw. Een nieuwe chat openen in een app die al draaide
+  is niet genoeg — die gebruikt nog de instellingen van toen de app startte.
+
+Geef daarna een opdracht en de HUD vult zich.
 
 Blijft het leeg, dubbelklik dan **`Diagnose.cmd`**. Die loopt de hele keten na —
 bestanden, hooks in `settings.json`, een echte proefaanroep van de beacon, de

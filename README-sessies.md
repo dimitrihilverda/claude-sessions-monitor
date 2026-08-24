@@ -146,7 +146,7 @@ powershell -ExecutionPolicy Bypass -File hud.ps1
 | Klik op een rij | haalt het venster van die sessie naar voren |
 | Shift + klik | opent de projectmap in Verkenner |
 | Ctrl + klik | laat zien welke vensters de HUD vond en met welke score — voor als hij het verkeerde venster pakt |
-| Rechtermuis | menu: altijd bovenop, compacte rijen, alleen aandacht nodig, dashboard openen, starten bij inloggen, afsluiten |
+| Rechtermuis | menu: altijd bovenop, compacte rijen, alleen aandacht nodig, dashboard openen, starten bij inloggen, herstarten, afsluiten |
 | Dubbelklik op het tray-icoon | HUD verbergen of terugtoveren |
 | Esc / F5 | verbergen / nu verversen |
 

@@ -147,6 +147,7 @@ $state = [ordered]@{
     dragFrom  = $null
     formFrom  = $null
     fp        = ''
+    restart   = $false      # gezet door 'HUD herstarten' in het menu
     fpUi      = ''          # hoe het venster er nu uitziet
     lastCount = -1          # aantal rijen bij de vorige tekening
     clock     = '--:--'
@@ -427,6 +428,19 @@ $miStart.Add_Click({
 [void]$menu.Items.Add($miStart)
 
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+
+# Herstarten start de nieuwe HUD pas nadat deze is afgesloten (zie onderaan het
+# script). Anders draaien er even twee tegelijk en schrijven ze allebei naar
+# hud-config.json en sessions.json.
+$miRestart = New-Object System.Windows.Forms.ToolStripMenuItem 'HUD herstarten'
+$miRestart.Add_Click({
+    $state.restart = $true
+    Save-Cfg
+    $tray.Visible = $false
+    $form.Close()
+})
+[void]$menu.Items.Add($miRestart)
+
 $miQuit = New-Object System.Windows.Forms.ToolStripMenuItem 'HUD afsluiten'
 $miQuit.Add_Click({ Save-Cfg; $tray.Visible = $false; $form.Close() })
 [void]$menu.Items.Add($miQuit)
@@ -518,3 +532,16 @@ $form.Add_FormClosing({ $timer.Stop(); $tray.Visible = $false; Save-Cfg })
 Set-Rounded
 [void]$form.ShowDialog()
 $tray.Dispose()
+
+if ($state.restart) {
+    try {
+        $vbs = Join-Path $Root 'hud.vbs'
+        if (Test-Path $vbs) {
+            Start-Process -FilePath 'wscript.exe' -ArgumentList ('"' + $vbs + '"') -WorkingDirectory $Root
+        } else {
+            Start-Process -FilePath 'powershell.exe' -WorkingDirectory $Root -WindowStyle Hidden `
+                -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+                                ('"' + (Join-Path $Root 'hud.ps1') + '"'))
+        }
+    } catch { }
+}

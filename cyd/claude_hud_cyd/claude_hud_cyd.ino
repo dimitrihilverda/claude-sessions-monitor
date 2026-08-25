@@ -541,7 +541,7 @@ String tokenArg() {
 void sendFocus(int idx) {
   if (idx < 0 || idx >= nRows) return;
   String r = httpGet("/focus?id=" + rows[idx].id + tokenArg());
-  say(r.length() ? r.substring(0, 22) : String(TXT_NOREPLY));
+  say(r.length() ? r.substring(0, 40) : String(TXT_NOREPLY));
   drawHeader();
 }
 
@@ -549,7 +549,7 @@ void sendAction(const char* btn) {
   if (nRows == 0) { say(TXT_NOSESS); drawHeader(); return; }
   int idx = (selIdx >= 0 && selIdx < nRows) ? selIdx : 0;
   String r = httpGet("/action?id=" + rows[idx].id + "&b=" + btn + tokenArg());
-  say(r.length() ? r.substring(0, 22) : String(TXT_NOREPLY));
+  say(r.length() ? r.substring(0, 40) : String(TXT_NOREPLY));
   drawHeader();
 }
 

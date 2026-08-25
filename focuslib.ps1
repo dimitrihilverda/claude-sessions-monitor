@@ -35,6 +35,11 @@ namespace Dash {
     [DllImport("user32.dll")] public static extern bool   IsIconic(IntPtr h);
     [DllImport("user32.dll")] public static extern void   SwitchToThisWindow(IntPtr h, bool altTab);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern bool   AttachThreadInput(uint from, uint to, bool attach);
+    [DllImport("user32.dll")] public static extern bool   BringWindowToTop(IntPtr h);
+    [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll", EntryPoint = "GetWindowThreadProcessId")]
+    public static extern uint ThreadOf(IntPtr h, IntPtr pid);
 
     [DllImport("user32.dll")] static extern int GetWindowTextLength(IntPtr h);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int max);
@@ -139,14 +144,46 @@ function Get-DashBestWindow {
     return $null
 }
 
+<#
+  Bring a window to the front, and say honestly whether it worked.
+
+  Windows only lets a process call SetForegroundWindow under narrow conditions --
+  roughly, it has to own the current foreground window or have just handled user
+  input. The HUD is a real GUI process and usually qualifies. session-api.ps1 does
+  not: it runs hidden, started by wscript, so its calls are silently ignored and
+  the window stays exactly where it was.
+
+  Hence three attempts, cheapest first. The third briefly attaches our input
+  queue to the target window's thread, which makes Windows treat the call as
+  coming from that thread and is the long-standing remedy for precisely this. We
+  detach again in a finally, because leaving the queues attached would tie our
+  input handling to another process.
+#>
 function Show-DashWindow {
     param([Parameter(Mandatory = $true)]$Handle)
     try {
         if ([Dash.Win]::IsIconic($Handle)) { [void][Dash.Win]::ShowWindow($Handle, 9) }  # SW_RESTORE
-        if (-not [Dash.Win]::SetForegroundWindow($Handle)) {
-            [Dash.Win]::SwitchToThisWindow($Handle, $true)
-        }
+
+        [void][Dash.Win]::SetForegroundWindow($Handle)
+        if ([Dash.Win]::GetForegroundWindow() -eq $Handle) { return $true }
+
+        [Dash.Win]::SwitchToThisWindow($Handle, $true)
         Start-Sleep -Milliseconds 60
+        if ([Dash.Win]::GetForegroundWindow() -eq $Handle) { return $true }
+
+        $eigen = [Dash.Win]::GetCurrentThreadId()
+        $doel  = [Dash.Win]::ThreadOf($Handle, [IntPtr]::Zero)
+        if ($doel -ne 0 -and $doel -ne $eigen) {
+            $vast = $false
+            try {
+                $vast = [Dash.Win]::AttachThreadInput($eigen, $doel, $true)
+                [void][Dash.Win]::BringWindowToTop($Handle)
+                [void][Dash.Win]::SetForegroundWindow($Handle)
+            } finally {
+                if ($vast) { [void][Dash.Win]::AttachThreadInput($eigen, $doel, $false) }
+            }
+            Start-Sleep -Milliseconds 60
+        }
         return ([Dash.Win]::GetForegroundWindow() -eq $Handle)
     } catch { return $false }
 }
@@ -160,7 +197,11 @@ function Invoke-DashSessionFocus {
     if ($Session.PSObject.Properties['host_pid'] -and $Session.host_pid) { $hostPid = [int]$Session.host_pid }
     $best = Get-DashBestWindow -Cwd ([string]$Session.cwd) -OwnerPid ([int]$Session.owner_pid) -HostPid $hostPid
     if ($best) {
-        [void](Show-DashWindow -Handle $best.Handle)
+        # Niet weggooien wat we net hebben uitgezocht: Show-DashWindow weet of het
+        # venster echt naar voren kwam, en zonder die uitkomst meldt de API "ok"
+        # terwijl er op het scherm niets gebeurt. Dat kostte een halve middag.
+        $gelukt = Show-DashWindow -Handle $best.Handle
+        $best | Add-Member -NotePropertyName Raised -NotePropertyValue $gelukt -Force
         return $best
     }
     if ($FolderFallback) {

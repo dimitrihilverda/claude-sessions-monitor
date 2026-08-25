@@ -453,9 +453,15 @@ while ($true) {
                     } elseif ($path -eq '/focus') {
                         Reset-SessieCache
                         $w = Invoke-DashSessionFocus -Session $sess
-                        if ($w) {
+                        if ($w -and $w.Raised) {
                             Write-DashLog "TIK -> $($sess.name) : $($w.Title)"
                             $body = (T 'ok.action' @($sess.name))
+                        } elseif ($w) {
+                            # Gevonden, maar Windows liet het niet naar voren komen.
+                            # Dat is iets anders dan "geen venster", en het scherm
+                            # hoort dat verschil te zien.
+                            Write-DashLog "TIK -> $($sess.name) : gevonden maar niet naar voren gekomen ($($w.Title))"
+                            $body = (T 'err.windowNotRaised')
                         } else {
                             Write-DashLog "TIK -> $($sess.name) : geen venster gevonden"
                             $body = 'err geen venster'

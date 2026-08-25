@@ -55,6 +55,10 @@ const char* PORTAAL_SSID = "Claude-Deck";
 const char* PORTAAL_PASS = "claudedeck";
 
 const uint32_t POLL_MS       = 3000;   // how often we ask the PC for the state
+/* Once we are offline, ask more often. A failed poll already blocks for up to
+   the HTTP timeout, so at 3 s intervals a few dropped packets leave you staring
+   at "no connection" for tens of seconds. */
+const uint32_t POLL_MS_OFF   = 1200;
 const uint8_t  BACKLIGHT_PCT = 70;     // brightness 0-100
 const bool     BEEP_ENABLED  = true;   // beep on a new attention request
 #define USE_RGB_LED   1                // the status LED on the board itself
@@ -167,6 +171,12 @@ String   uiHeader   = "CLAUDE";
 String   uiState[3] = { "NEEDS YOU", "WORKING", "DONE" };   // attention, active, done
 String   uiEmpty    = "No active sessions.";
 
+/* A one-shot command from the PC, picked up in the header line of /cyd.txt.
+   We only set a flag here and act on it in loop(): running the cracktro from
+   inside poll() would mean parsing carries on afterwards on stale data. */
+bool     cmdCracktro = false;
+bool     cmdSeen     = false;   // already acted on the command now on offer
+
 /* These four are deliberately local: they are on screen precisely when there
    is NO connection, so the PC cannot supply them. Set CYD_LANG_NL to 1 if you
    want the display in Dutch while it is offline. */
@@ -191,11 +201,15 @@ const char* TXT_NOREPLY   = "pc reageert niet";
 const char* TXT_NOSESS    = "geen sessies";
 const char* TXT_SETUP     = "instellen...";
 const char* TXT_LIGHT     = "licht ";
+const char* TXT_RETRY     = "poging ";
+const char* TXT_AGO       = "s zonder contact";
 #else
 const char* TXT_NOREPLY   = "no reply from PC";
 const char* TXT_NOSESS    = "no sessions";
 const char* TXT_SETUP     = "setting up...";
 const char* TXT_LIGHT     = "light ";
+const char* TXT_RETRY     = "attempt ";
+const char* TXT_AGO       = "s since last contact";
 #endif
 String   fingerprint = "";
 String   attKey = "";
@@ -212,6 +226,7 @@ int      blIdx = 1;            // points at 70, matching BACKLIGHT_PCT
 uint32_t btnFlashUntil = 0;
 bool     online = false;
 uint32_t lastPoll = 0, lastOkMs = 0, lastTouch = 0;
+int      pollFails = 0;        // consecutive failed polls, shown while offline
 
 // ---- settings from NVS (declared here already: httpGet uses them) ----------
 Preferences nvs;
@@ -425,6 +440,40 @@ void drawButtonBar() {
   for (int i = 0; i < 3; i++) drawButton(i, i == btnFlash);
 }
 
+/* Het levende deel van het offline-scherm. Alleen dit strookje wordt hertekend,
+   vijf keer per seconde: een balkje dat vollooopt naar de volgende poging, het
+   pogingnummer en hoe lang er al geen contact is. Zo zie je dat hij bezig is in
+   plaats van een stilstaande foutmelding. */
+void drawRetry() {
+  /* Op de plek van de derde rij: rij 1 draagt de "houd de bovenbalk vast"-hint,
+     en die zou anders vijf keer per seconde worden weggeveegd. */
+  const int Y = ROW_Y + 2 * ROW_H + 2;
+  uint32_t interval = POLL_MS_OFF;
+  uint32_t sinds    = millis() - lastPoll;
+  if (sinds > interval) sinds = interval;
+
+  // voortgangsbalkje naar de volgende poging
+  int vol = (int)((uint32_t)308 * sinds / interval);
+  row.createSprite(320, 22);
+  row.fillSprite(COL_BG);
+  row.fillRect(6, 0, 308, 3, COL_ROW);
+  row.fillRect(6, 0, vol, 3, COL_ORANGE);
+
+  row.setTextFont(2);
+  row.setTextDatum(TL_DATUM);
+  row.setTextColor(COL_MUTED, COL_BG);
+  /* De RSSI staat erbij omdat dit meestal geen storing in de software is maar
+     bereik. Zie je hier -75 dBm of lager, dan is het schermpje te ver van je
+     accesspoint en helpt geen enkele instelling. */
+  uint32_t weg = (millis() - lastOkMs) / 1000;
+  String s = String(TXT_RETRY) + pollFails + "  -  " + weg + TXT_AGO;
+  if (WiFi.status() == WL_CONNECTED) s += "  -  " + String(WiFi.RSSI()) + " dBm";
+  else                               s += "  -  no wifi";
+  row.drawString(s, 16, 7);
+  row.pushSprite(0, Y);
+  row.deleteSprite();
+}
+
 void drawAll() {
   drawHeader();
   for (int i = 0; i < MAX_ROWS; i++) drawRow(i);
@@ -441,7 +490,11 @@ void flashAttention() {
 
 // ---- talking to the PC -----------------------------------------------------
 String httpGet(const String& path) {
-  if (WiFi.status() != WL_CONNECTED) return "";
+  if (WiFi.status() != WL_CONNECTED) {
+    static uint32_t lastWifiLog = 0;
+    if (millis() - lastWifiLog > 2000) { lastWifiLog = millis(); Serial.println("poll: wifi not connected"); }
+    return "";
+  }
   HTTPClient http;
   String url = String("http://") + cfgHost + ":" + cfgPort + path;
   /* 4 s, not 2.5. The API builds the session list through WMI process queries,
@@ -449,12 +502,35 @@ String httpGet(const String& path) {
      the poll regularly fell over that and the display said "no answer" while
      nothing was wrong. Do not go higher: a failed poll blocks this loop, and
      the touchscreen does not respond for that long. */
-  http.setConnectTimeout(4000);
-  http.setTimeout(4000);
-  if (!http.begin(url)) return "";
+  /* 4 s zolang het goed gaat: de API kan er bij een koude cache 1,5 s over doen
+     en die poll wil je niet weggooien. Maar zodra we offline zijn is een lange
+     timeout juist schadelijk -- elke mislukte poging kost dan 4 seconden, en met
+     een haperende wifi sta je zo een minuut in het donker. Offline dus kort
+     wachten en snel opnieuw proberen. */
+  /* Offline korter wachten dan online, maar niet te kort. 1500 ms was een val:
+     als de API er 1,3 s over doet, valt de poll er net over, blijft hij offline
+     en houdt daarmee de korte timeout -- dat houdt zichzelf in stand. 3000 ms
+     zit ruim boven de traagste gemeten respons en halveert nog steeds de tijd
+     die een mislukte poging kost. */
+  uint16_t tmo = online ? 4000 : 3000;
+  http.setConnectTimeout(tmo);
+  http.setTimeout(tmo);
+  if (!http.begin(url)) { Serial.println("poll: begin() failed"); return ""; }
+  uint32_t t0 = millis();
   int code = http.GET();
   String body = (code == 200) ? http.getString() : String("");
   http.end();
+  /* Log why a poll failed. Rate-limited, because while offline this runs every
+     POLL_MS_OFF and would otherwise bury everything else in the log. */
+  if (code != 200) {
+    static uint32_t lastLog = 0;
+    if (millis() - lastLog > 2000) {
+      lastLog = millis();
+      Serial.printf("poll: HTTP %d after %lu ms, heap %u, rssi %d\n",
+                    code, (unsigned long)(millis() - t0),
+                    (unsigned)ESP.getFreeHeap(), WiFi.RSSI());
+    }
+  }
   return body;
 }
 
@@ -519,11 +595,11 @@ bool poll() {
     if (!line.length()) continue;
 
     if (line.charAt(0) == '#') {
-      /* #<att>|<act>|<done>|<HH:mm>|<button labels ;>|<header text>|<state labels ;>
-         The last two fields were added later; an older API does not send them
-         and we simply keep the fallback. */
-      String f[7];
-      splitFields(line, 1, f, 7);
+      /* #<att>|<act>|<done>|<HH:mm>|<button labels ;>|<header text>|<state labels ;>|<cmd>
+         The last fields were added later; an older API does not send them and we
+         simply keep the fallback. */
+      String f[8];
+      splitFields(line, 1, f, 8);
       att = f[0].toInt(); act = f[1].toInt(); done = f[2].toInt();
       if (f[3].length()) clk = f[3];
       if (f[4].length()) splitList(f[4], labels, 3);      // button labels
@@ -534,6 +610,10 @@ bool poll() {
         for (int i = 0; i < 3; i++) if (s[i].length()) uiState[i] = s[i];
         if (s[3].length()) uiEmpty = s[3];
       }
+      /* The PC keeps a command on offer for a few seconds, so act on it once and
+         then wait until the field is empty again before arming for the next. */
+      if (!f[7].length())                     cmdSeen = false;
+      else if (f[7] == "cracktro" && !cmdSeen) { cmdCracktro = true; cmdSeen = true; }
       continue;
     }
 
@@ -668,6 +748,7 @@ void handleButtons() {
       if (down && !btnWas[i]) btnAt[i] = millis();
       if (!down && btnWas[i]) {
         uint32_t vast = millis() - btnAt[i];
+        Serial.printf("BOOT held %lu ms\n", (unsigned long)vast);
         if (vast >= 2000)     cracktro();
         else if (vast > 40)   sendAction(BUTTONS[i].id);   // 40 ms = debounce
       }
@@ -864,6 +945,10 @@ void portaalLus() {
    -75 dBm or lower it is simply range, and no setting helps. */
 void wifiVerbonden() {
   WiFi.setSleep(false);
+  /* Zendvermogen expliciet op het maximum. De core doet dat meestal al, maar
+     niet altijd -- en op een marginale link (-75 dBm of lager) is elke dB het
+     verschil tussen een TCP-handshake die lukt en een die de timeout uitloopt. */
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
   Serial.printf("IP: %s  RSSI %d dBm\n",
                 WiFi.localIP().toString().c_str(), WiFi.RSSI());
 }
@@ -902,7 +987,10 @@ void bewaakWifi() {
    >>> YOUR OWN TEXT HERE <<<  Leave the trailing spaces, then it wraps around
    neatly instead of colliding with itself. */
 const char* SCROLL_TEXT =
-  "CLAUDE DECK ... GREETINGS TO ... EN JIJ VULT DE REST IN ...        ";
+  "CLAUDE DECK ... MADE BY DIMMY OF OMEGAWARE ... GREETINGS TO MY LOVELY "
+  "COLLEAGUE CHANTIE ... TO NATHAN THE AI MASTER ... RUBEN THE CHIEF ... "
+  "ALL AIMELO MEMBERS! ... HAVE FUN WITH THIS TOOL, AND MAY THE CLAUDE BE "
+  "WITH YOU!!        ";
 
 /* Melody for the speaker on IO26. Note: the CYD has no speaker on board, only
    the pads -- without soldering one on, this stays silent.
@@ -915,6 +1003,14 @@ struct Star { int16_t x, y; uint8_t laag; };
 
 void cracktro() {
   // polling and reconnecting pause while this runs; it is a deliberate action
+  Serial.println("cracktro: start");
+
+  /* Which buttons are already down as we come in? The BOOT button certainly is
+     if you got here by holding it, and an unwired GPIO35 may be too. Those do
+     not count as an exit until they have been seen released once. */
+  bool startDown[8];
+  for (int i = 0; i < N_BTN; i++) startDown[i] = (digitalRead(BUTTONS[i].pin) == LOW);
+
   tft.fillScreen(TFT_BLACK);
   tft.setViewport(0, 0, 320, 240);
 
@@ -940,21 +1036,32 @@ void cracktro() {
     cop[i] = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
   }
 
+  const int LOGO_Y = 44, LOGO_H = 32, COP_Y = 96, COP_H = 44;
+  const int SCR_Y = 182, SCR_H = 56, GOLF = 14;
+
   TFT_eSprite scr = TFT_eSprite(&tft);
   scr.setColorDepth(16);
-  scr.createSprite(320, 26);
-
-  const int LOGO_Y = 44, LOGO_H = 32, COP_Y = 96, COP_H = 44, SCR_Y = 190;
+  /* 46 tall, not 26: font 4 is 26 pixels by itself, and the swing of the wave
+     comes on top of that. At 26 the letters were cut off at the bottom. */
+  scr.createSprite(320, SCR_H);
   int scrollX = 320;
   uint32_t frame = 0, t0 = millis();
   int noot = -1;
 
   while (true) {
     // ---- time to leave? --------------------------------------------------
-    if (ts.touched()) break;
-    bool knop = false;
-    for (int i = 0; i < N_BTN; i++) if (digitalRead(BUTTONS[i].pin) == LOW) knop = true;
-    if (knop) break;
+    /* Only leave on a button that goes down while we are here. Reading "is it
+       low right now" was wrong: GPIO35 has no internal pull-up, so with no
+       10k resistor fitted it floats and reads low at random -- which dropped
+       straight back out of the cracktro on the first pass through this loop. */
+    if (ts.touched()) { Serial.println("cracktro: touch"); break; }
+    bool weg = false;
+    for (int i = 0; i < N_BTN; i++) {
+      bool nu = (digitalRead(BUTTONS[i].pin) == LOW);
+      if (nu && !startDown[i]) { Serial.printf("cracktro: button %s\n", BUTTONS[i].id); weg = true; }
+      if (!nu) startDown[i] = false;      // released: from now on it counts
+    }
+    if (weg) break;
 
     // ---- stars -----------------------------------------------------------
     for (int i = 0; i < N_STAR; i++) {
@@ -963,7 +1070,7 @@ void cracktro() {
       if (st[i].x < 0) { st[i].x = 319; st[i].y = random(240); }
       // do not draw stars over the logo and the scroller
       bool bedekt = (st[i].y >= LOGO_Y && st[i].y < COP_Y + COP_H) ||
-                    (st[i].y >= SCR_Y && st[i].y < SCR_Y + 26);
+                    (st[i].y >= SCR_Y && st[i].y < SCR_Y + SCR_H);
       if (!bedekt) tft.drawPixel(st[i].x, st[i].y, sterKleur[st[i].laag]);
     }
 
@@ -999,9 +1106,21 @@ void cracktro() {
       char c[2] = { *p, 0 };
       int w = scr.textWidth(c);
       if (x + w > 0) {
-        int golf = (int)(sin((x + frame * 3) * 0.035f) * 5.0f);
+        /* The classic sine scroller: the wave stands STILL on screen and the
+           letters ride through it. So the offset depends only on where a letter
+           is on screen -- deliberately no time term. Add one and the wave
+           travels along with the text, which is what made an earlier version
+           look like a frozen wavy line instead of moving letters.
+
+           cos() rather than sin(), measured from the right-hand edge: that puts
+           a letter at the BOTTOM as it enters (cos 0 = 1, and a larger offset is
+           lower on screen), after which it climbs to the top. K gives one and a
+           half periods across the 320 pixels, so every letter visibly rises and
+           falls on its way across. */
+        const float K = 0.0295f;                  // 1.5 * 2*PI / 320
+        int golf = (int)(cos((320 - x) * K) * (float)GOLF);
         scr.setTextColor(cop[(int)((x / 8) + frame / 2) % N_COP]);
-        scr.drawString(c, x, 8 + golf);
+        scr.drawString(c, x, (SCR_H / 2) - 13 + golf);
       }
       x += w;
     }
@@ -1035,6 +1154,7 @@ void cracktro() {
 #else
   ledcWriteTone(LEDC_TONE, 0); ledcDetachPin(PIN_SPK);
 #endif
+  Serial.println("cracktro: end");
   scr.deleteSprite();
   tft.resetViewport();
   while (ts.touched()) delay(20);       // finger off the glass before we carry on
@@ -1107,9 +1227,10 @@ void loop() {
   handleTouch();
   handleButtons();
 
-  if (millis() - lastPoll >= POLL_MS) {
+  if (millis() - lastPoll >= (online ? POLL_MS : POLL_MS_OFF)) {
     lastPoll = millis();
     bool ok = poll();
+    if (ok) pollFails = 0; else pollFails++;
     if (!ok && millis() - lastOkMs > 15000 && online) {
       online = false; nRows = 0; nAtt = nAct = nDone = 0;
       fingerprint = ""; setLed(false, false, true); drawAll();
@@ -1117,6 +1238,18 @@ void loop() {
       online = true; fingerprint = ""; drawAll();
     }
   }
+
+  /* While offline, keep the retry line moving. Without it the screen just says
+     "no connection" and looks dead, so you cannot tell whether it has given up
+     or is still trying -- which is exactly what it does, every POLL_MS_OFF. */
+  if (!online) {
+    static uint32_t lastRetryDraw = 0;
+    if (millis() - lastRetryDraw > 200) { lastRetryDraw = millis(); drawRetry(); }
+  }
+
+  // A command from the PC. Handled here rather than in poll(), so the parser
+  // has finished before the cracktro takes over the screen.
+  if (cmdCracktro) { cmdCracktro = false; cracktro(); }
 
   // let a lit button go out again
   if (btnFlashUntil && millis() > btnFlashUntil) {

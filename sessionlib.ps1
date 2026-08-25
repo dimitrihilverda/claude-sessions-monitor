@@ -472,6 +472,7 @@ function Write-DashPayload {
             why        = $s.why
             since      = $s.since
             updated    = $s.updated
+            sort_ts    = $s.sort_ts
         }
     }
 

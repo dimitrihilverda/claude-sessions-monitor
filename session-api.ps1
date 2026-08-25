@@ -27,7 +27,17 @@ param(
     [int]$Port = 8787,
     # How long the session list may be reused. 0 = rebuild every time (the old
     # behaviour, slow). See the explanation at Get-SessieCache.
-    [int]$CacheMs = 1500
+    [int]$CacheMs = 1500,
+    # How long a one-shot command stays on offer for the display. A few polls'
+    # worth, so a stray request cannot swallow it first.
+    [int]$CommandTtlSec = 6,
+    # How fresh sessions.json has to be before we trust it instead of rebuilding.
+    # Larger than the HUD's 3 s refresh, so one slow write does not cost us a
+    # 1.3 s WMI rebuild.
+    [int]$PayloadMaxAgeSec = 10,
+    # Log every incoming request, for when you need to know whether the display
+    # is reaching the PC at all.
+    [switch]$LogRequests
 )
 $ErrorActionPreference = 'Continue'
 
@@ -55,6 +65,31 @@ function Write-DashLog([string]$txt) {
   buttons follow the Windows display language like everything else. Any
   "minutes" is passed in, which is what makes "Snooze {0} min" work.
 #>
+<#
+  A one-shot command for the display. The display polls; the PC cannot push, so
+  a command waits here until the next poll picks it up and is then cleared. That
+  keeps it to one field in the header line and no extra state on the device.
+#>
+$script:pendingCmd   = ''
+$script:pendingUntil = [datetime]::MinValue
+
+function Set-DisplayCommand([string]$cmd) {
+    $script:pendingCmd   = $cmd
+    $script:pendingUntil = [datetime]::UtcNow.AddSeconds($CommandTtlSec)
+}
+
+<#
+  Deliberately NOT cleared on the first read. Clearing on read meant whoever
+  polled first won it -- and a browser on the status page, or a curl while
+  testing, would swallow the command before the display ever saw it. Instead it
+  stays on offer for a few seconds. The display re-arms only once the field is
+  empty again, so a handful of polls inside the window still act once.
+#>
+function Read-DisplayCommand {
+    if ([datetime]::UtcNow -gt $script:pendingUntil) { $script:pendingCmd = '' }
+    return $script:pendingCmd
+}
+
 function Get-ButtonLabel($def, [string]$btn) {
     if ($def -and $def.label)    { return [string]$def.label }
     if ($def -and $def.labelKey) { return (T ([string]$def.labelKey) @($def.minutes)) }
@@ -104,6 +139,7 @@ function Format-Cyd($p) {
         field 6  header text        composed here, because only the PC knows
                                     whether it is "1 needs you" or "2 need you"
         field 7  state labels       attention;active;done;no-sessions
+        field 8  one-shot command   empty, or e.g. "cracktro"
     #>
     $kop =
         if     ($p.attention -gt 0) { T 'cyd.waitingCount' @($p.attention, $(if ($p.attention -eq 1) { '' } else { $(if ($script:DashLang -eq 'nl') { 'EN' } else { '' }) })) }
@@ -117,7 +153,7 @@ function Format-Cyd($p) {
     $sb = New-Object System.Text.StringBuilder
     [void]$sb.Append('#').Append($p.attention).Append('|').Append($p.active).Append('|').Append($p.done).Append('|').Append((Get-Date).ToString('HH:mm')).Append('|').Append(($labels -join ';')).Append('|').Append(($kop -replace '[
 
-\|;]', ' ')).Append('|').Append($statusLabels).Append("`n")
+\|;]', ' ')).Append('|').Append($statusLabels).Append('|').Append((Read-DisplayCommand)).Append("`n")
     foreach ($s in $p.sessions) {
         $why = ([string]$s.why -replace '[\r\n\|]', ' ')
         # the name is the session title; put the folder in front of the second line
@@ -278,13 +314,56 @@ $script:cacheAt   = [datetime]::MinValue
 $script:cacheAll  = $null
 $script:cachePay  = $null
 
+<#
+  Prefer reading sessions.json over rebuilding.
+
+  The HUD already writes that file every 3 seconds, from the same sessionlib
+  code, so rebuilding here duplicates the expensive part for nothing. Measured:
+  rebuilding costs 1.17-1.45 s because it walks WMI process queries per session,
+  while reading the file costs a few milliseconds.
+
+  That mattered more than it looks. The display polls every 3 s with a timeout of
+  its own, and every poll was landing on a fresh 1.3 s rebuild -- so a hiccup on
+  the Wi-Fi was enough to tip it into "no connection", and the in-memory cache
+  never helped because its TTL was shorter than the poll interval.
+
+  We only rebuild when the file is missing or stale, which means the HUD is not
+  running. $PayloadMaxAgeSec is deliberately larger than the HUD's 3 s refresh so
+  a single slow write does not send us back to WMI.
+#>
+function Read-PayloadFile {
+    $pad = Join-Path $Root 'sessions.json'
+    if (-not (Test-Path $pad)) { return $null }
+    try {
+        $leeftijd = ((Get-Date) - (Get-Item $pad).LastWriteTime).TotalSeconds
+        if ($leeftijd -gt $PayloadMaxAgeSec) { return $null }
+        $p = Get-Content $pad -Raw -Encoding UTF8 | ConvertFrom-Json
+        if (-not $p -or -not $p.PSObject.Properties['sessions']) { return $null }
+        # everything in the file is a visible session; the action code filters on it
+        foreach ($s in @($p.sessions)) {
+            if (-not $s.PSObject.Properties['visible']) {
+                $s | Add-Member -NotePropertyName visible -NotePropertyValue $true
+            }
+        }
+        return $p
+    } catch { return $null }
+}
+
 function Get-SessieCache {
     $oud = ([datetime]::UtcNow - $script:cacheAt).TotalMilliseconds
-    if ($null -eq $script:cacheAll -or $oud -ge $CacheMs) {
+    if ($null -ne $script:cacheAll -and $oud -lt $CacheMs) {
+        return @{ all = $script:cacheAll; payload = $script:cachePay }
+    }
+
+    $p = Read-PayloadFile
+    if ($p) {
+        $script:cachePay = $p
+        $script:cacheAll = @($p.sessions)
+    } else {
         $script:cacheAll = Get-Sessions
         $script:cachePay = Get-Payload $script:cacheAll
-        $script:cacheAt  = [datetime]::UtcNow
     }
+    $script:cacheAt = [datetime]::UtcNow
     return @{ all = $script:cacheAll; payload = $script:cachePay }
 }
 
@@ -308,6 +387,13 @@ while ($true) {
     $client = $null
     try {
         $client = $listener.AcceptTcpClient()
+        # -LogRequests writes one line per request with the client address. Off by
+        # default (it would fill actions.log at three requests per second), but
+        # invaluable when the display claims it cannot reach us: it settles in one
+        # look whether requests arrive at all, or never leave the device.
+        if ($LogRequests) {
+            try { Write-DashLog ("REQ van " + $client.Client.RemoteEndPoint.ToString()) } catch { }
+        }
         $client.ReceiveTimeout = 2000
         $client.SendTimeout    = 4000
         $ns = $client.GetStream()
@@ -336,6 +422,14 @@ while ($true) {
         $ctype = 'text/plain; charset=utf-8'
 
         switch ($path) {
+            '/demo' {
+                # Kick the display into its cracktro from the PC. Handy for showing
+                # it off without walking over to press BOOT.
+                Set-DisplayCommand 'cracktro'
+                Write-DashLog 'DEMO -> cracktro'
+                $body = 'ok cracktro'
+            }
+
             '/cyd.txt'       { $body = Format-Cyd  $p }
             '/sessions.json' { $body = ($p | ConvertTo-Json -Depth 6 -Compress); $ctype = 'application/json; charset=utf-8' }
 

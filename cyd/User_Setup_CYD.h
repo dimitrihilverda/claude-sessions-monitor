@@ -24,6 +24,13 @@
 #define TFT_BL      21
 #define TFT_BACKLIGHT_ON HIGH
 
+// Dit CYD-paneel start met omgekeerde kleuren op: stuur je magenta, dan toont
+// hij groen. Geen van de ILI9341-init-sequenties in TFT_eSPI stuurt zelf een
+// inversie-commando, dus zetten we het hier. TFT_eSPI stuurt dan 0x21 (INVON)
+// direct na de init (zie TFT_eSPI.cpp, rond regel 774).
+#define TFT_INVERSION_ON
+
+
 // Touch zit op de CYD op een tweede SPI-bus (MISO 39, MOSI 32, CLK 25, CS 33)
 // en werkt dus niet via TFT_eSPI. De sketch gebruikt geen touch.
 // #define TOUCH_CS 33

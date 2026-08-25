@@ -49,7 +49,8 @@ if (Test-Path $settingsPad) {
 $paden = @(
     (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Claude HUD.lnk'),
     (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Claude Deck API.lnk'),
-    (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Claude HUD.lnk')
+    (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Claude HUD.lnk'),
+    (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Claude Deck API.lnk')
 )
 foreach ($p in $paden) { if (Test-Path $p) { Remove-Item $p -Force; Zeg "  - $(Split-Path -Leaf $p)" } }
 

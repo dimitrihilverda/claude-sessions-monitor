@@ -24,7 +24,10 @@
 #  zit dat je niet vertrouwt; de CYD stuurt hem dan mee.
 # =============================================================================
 param(
-    [int]$Port = 8787
+    [int]$Port = 8787,
+    # Hoe lang de sessielijst hergebruikt mag worden. 0 = altijd opnieuw opbouwen
+    # (het oude gedrag, traag). Zie de uitleg bij Get-SessieCache.
+    [int]$CacheMs = 1500
 )
 $ErrorActionPreference = 'Continue'
 
@@ -217,6 +220,39 @@ function Split-Query([string]$qs) {
     return $h
 }
 
+<#
+  Sessielijst kort cachen.
+
+  Get-Sessions gaat via sessionlib naar Get-CimInstance Win32_Process, en zo'n
+  WMI-procesquery kost honderden milliseconden -- per sessie. Gemeten: 1,4 s per
+  verzoek, met uitschieters naar 4,25 s als WMI traag is. Dat werd bij elk
+  verzoek opnieuw gedaan, terwijl de CYD elke 3 seconden vraagt.
+
+  Gevolg: de CYD (time-out 2,5 s) liep op de uitschieters vast, en omdat deze
+  server een enkele AcceptTcpClient-lus is wachtte een tweede client daar nog
+  eens bovenop. Dat gaf het beeld "soms werkt het, soms niet".
+
+  Met een cache van standaard 1500 ms wordt vrijwel elk verzoek uit het geheugen
+  bediend. De stand is dan maximaal anderhalve seconde oud; dat merk je niet aan
+  iets dat op menselijke snelheid verandert, en het scheelt een factor duizend.
+#>
+$script:cacheAt   = [datetime]::MinValue
+$script:cacheAll  = $null
+$script:cachePay  = $null
+
+function Get-SessieCache {
+    $oud = ([datetime]::UtcNow - $script:cacheAt).TotalMilliseconds
+    if ($null -eq $script:cacheAll -or $oud -ge $CacheMs) {
+        $script:cacheAll = Get-Sessions
+        $script:cachePay = Get-Payload $script:cacheAll
+        $script:cacheAt  = [datetime]::UtcNow
+    }
+    return @{ all = $script:cacheAll; payload = $script:cachePay }
+}
+
+# Na een actie is de cache achterhaald: de volgende poll moet het gevolg zien.
+function Reset-SessieCache { $script:cacheAt = [datetime]::MinValue }
+
 $listener = New-Object System.Net.Sockets.TcpListener ([System.Net.IPAddress]::Any), $Port
 try { $listener.Start() } catch {
     Write-Host "Kan poort $Port niet openen: $($_.Exception.Message)"
@@ -256,8 +292,9 @@ while ($true) {
         }
         $q = Split-Query $qs
 
-        $all = Get-Sessions
-        $p   = Get-Payload $all
+        $snap = Get-SessieCache
+        $all  = $snap.all
+        $p    = $snap.payload
         $ctype = 'text/plain; charset=utf-8'
 
         switch ($path) {
@@ -282,6 +319,7 @@ while ($true) {
                     if (-not $sess) {
                         $body = 'err geen sessie'
                     } elseif ($path -eq '/focus') {
+                        Reset-SessieCache
                         $w = Invoke-DashSessionFocus -Session $sess
                         if ($w) {
                             Write-DashLog "TIK -> $($sess.name) : $($w.Title)"
@@ -294,6 +332,7 @@ while ($true) {
                         $btn  = [string]$q['b']
                         if (-not $btn) { $btn = '1' }
                         $body = Invoke-DashAction $sess $btn
+                        Reset-SessieCache
                     }
                 }
             }

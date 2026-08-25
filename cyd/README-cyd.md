@@ -47,18 +47,48 @@ sketch na een herstart niet meer.
 3. Kopieer `User_Setup_CYD.h` over
    `Documenten\Arduino\libraries\TFT_eSPI\User_Setup.h`.
    Let op: bij een update van TFT_eSPI wordt dat bestand overschreven.
-4. Open `claude_hud_cyd/claude_hud_cyd.ino` en vul bovenaan in:
-   `WIFI_SSID`, `WIFI_PASS`, `API_HOST` (het IP van je pc).
-5. Uploaden. Werkt de upload niet, houd dan BOOT ingedrukt terwijl je start.
+4. Uploaden. Werkt de upload niet, houd dan BOOT ingedrukt terwijl je start.
+
+Wifi en het adres van je pc hoef je *niet* in de sketch te zetten; die stel je in
+op het schermpje zelf. Zie de volgende paragraaf.
+
+## 2b. Wifi instellen zonder pc
+
+Bij de eerste start -- of als hij niet op je wifi kan komen -- zet de CYD zijn
+eigen netwerk op en zet hij op het scherm wat je moet doen:
+
+    netwerk:     Claude-Deck
+    wachtwoord:  claudedeck
+    daarna:      http://192.168.4.1
+
+Verbind je telefoon daarmee. Op de meeste telefoons springt de pagina van zichzelf
+open; zo niet, ga dan naar dat adres. Je kiest je netwerk uit een lijst, typt het
+wachtwoord en vult het adres van je pc in. Na opslaan herstart hij en verbindt hij.
+
+Alles wordt bewaard in NVS, het stukje flash dat een nieuwe sketch niet wist. Je
+gegevens blijven dus staan als je opnieuw flasht, en er staat geen wachtwoord in
+de sketch of in git.
+
+**Later nog eens wijzigen**: houd twee seconden je vinger op de bovenbalk (waar de
+tellers en de klok staan). Dat is de uitweg voor als hij wél op wifi zit maar het
+pc-adres verouderd is -- dan komt het portaal namelijk nooit vanzelf. Een kórte
+tik op die balk doet iets anders: die stapt de helderheid.
+
+Rol je meerdere schermpjes uit en wil je ze niet allemaal los instellen, dan kun
+je `WIFI_SSID_START`, `WIFI_PASS_START` en `API_HOST_START` bovenin de sketch
+vullen. Dat zijn startwaarden: zodra er iets in NVS staat, gaat die voor. Wat je
+daar neerzet komt wel in je git-geschiedenis terecht.
 
 ## 3. Als het niet klopt
 
 | Symptoom | Oorzaak |
 |---|---|
 | Wit of zwart scherm | verkeerde `User_Setup.h`, of `TFT_BL` niet op 21 |
-| Kleuren omgekeerd | wissel `ILI9341_2_DRIVER` voor `ILI9341_DRIVER` |
+| Kleuren omgekeerd (stuur je magenta, toont hij groen) | `#define TFT_INVERSION_ON` ontbreekt in je `User_Setup.h`. Geen van de ILI9341-init-sequenties stuurt zelf een inversie-commando, dus dit paneel blijft in zijn omgekeerde opstartstand. Let op dat twee donkere tinten dan allebei als lichtbeige uitkomen, waardoor kleurwijzigingen lijken alsof er niets verandert |
+| Kleuren door elkaar (blauw waar rood hoort) | dat is wél de driver: wissel `ILI9341_2_DRIVER` voor `ILI9341_DRIVER`. Meng nooit power- of gammawaarden uit een andere driver in een bestaande initvolgorde -- `0xC0`/`0xC1`/`0xC5`/`0xC7` horen bij elkaar en half overnemen ontregelt het paneel |
 | Spiegelbeeld of staand | `tft.setRotation(1)` naar 3 (of 0/2) |
-| "GEEN VERBINDING" | API draait niet, firewall blokkeert, of `API_HOST` is verouderd |
+| "GEEN VERBINDING" | de API draait niet (start "Claude Deck API" of `api.vbs`), de firewall blokkeert, of het pc-adres is verouderd -- dat laatste zet je goed door twee seconden op de bovenbalk te drukken en het portaal te openen |
+| Hij pakt je wifi niet meer (ander wachtwoord, nieuw netwerk) | hij zet dan zelf het netwerk `Claude-Deck` op; verbind je telefoon en stel hem opnieuw in. Geen USB nodig |
 | Geen piepje | de CYD heeft geen luidspreker aan boord; sluit er een op de speaker-pads (IO26) aan of zet `BEEP_ENABLED` op false |
 | Tik komt naast waar je drukt | zet `TOUCH_DEBUG` op 1, tik de vier hoeken aan, lees de raw-waarden in de seriële monitor en vul `TS_MINX/MAXX/MINY/MAXY` in. Staat alles gespiegeld, wissel dan `TOUCH_FLIP_X` / `TOUCH_FLIP_Y` |
 | Knop doet niets | knop 3 zit op GPIO35 en heeft een externe pull-up van 10k naar 3V3 nodig; zonder die weerstand zweeft de ingang |

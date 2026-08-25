@@ -169,7 +169,9 @@ Maak-Snelkoppeling (Join-Path $startMenu 'Claude HUD.lnk') (Join-Path $Doel 'hud
 Zeg '  + startmenu: Claude HUD'
 
 if (-not $Stil) { $Autostart = Vraag '  HUD starten bij inloggen?' $Autostart.IsPresent }
-$startupLnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Claude HUD.lnk'
+$startup     = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
+$startupLnk  = Join-Path $startup 'Claude HUD.lnk'
+$startupApi  = Join-Path $startup 'Claude Deck API.lnk'
 if ($Autostart) {
     Maak-Snelkoppeling $startupLnk (Join-Path $Doel 'hud.vbs') 'Claude-sessies in beeld'
     Zeg '  + autostart aan'
@@ -181,6 +183,21 @@ if ($Autostart) {
 if ($MetTouchscreen) {
     Maak-Snelkoppeling (Join-Path $startMenu 'Claude Deck API.lnk') (Join-Path $Doel 'api.vbs') 'Webservice voor het touchscreen'
     Zeg '  + startmenu: Claude Deck API'
+
+    # De API hoort mee te starten met de HUD. Zonder die service staat er op het
+    # touchscreen "GEEN VERBINDING" en ga je zoeken bij het schermpje, terwijl
+    # de bron op je pc simpelweg uit staat.
+    if ($Autostart) {
+        Maak-Snelkoppeling $startupApi (Join-Path $Doel 'api.vbs') 'Webservice voor het touchscreen'
+        Zeg '  + autostart aan voor de webservice'
+    } elseif (Test-Path $startupApi) {
+        Remove-Item $startupApi -Force
+        Zeg '  - autostart uit voor de webservice'
+    }
+} elseif (Test-Path $startupApi) {
+    # touchscreen niet (meer) gekozen: de autostart van de webservice weghalen
+    Remove-Item $startupApi -Force
+    Zeg '  - autostart webservice weggehaald'
 }
 
 # ---- 6. starten -------------------------------------------------------------
@@ -189,8 +206,14 @@ Start-Process -FilePath 'wscript.exe' -ArgumentList ('"' + (Join-Path $Doel 'hud
 Zeg '  De HUD staat nu rechtsboven in beeld. Sleep hem waar je wilt.' Green
 Zeg '  Rechtermuisknop geeft het menu: compact, alleen aandacht, herstarten, afsluiten.'
 if ($MetTouchscreen) {
+    # De HUD start hierboven al; de webservice hoort er meteen bij te komen,
+    # anders staat het touchscreen tot de volgende keer inloggen op
+    # "GEEN VERBINDING" terwijl de installatie zegt dat alles klaar is.
+    Start-Process -FilePath 'wscript.exe' -ArgumentList ('"' + (Join-Path $Doel 'api.vbs') + '"') -WorkingDirectory $Doel
     Zeg ''
-    Zeg '  Touchscreen: start "Claude Deck API" uit het startmenu.' Green
+    Zeg '  De webservice voor het touchscreen draait nu ook.' Green
+    if ($Autostart) { Zeg '  Hij komt vanaf nu bij elke keer inloggen mee.' }
+    else            { Zeg '  Start hem na een herstart via "Claude Deck API" in het startmenu.' DarkYellow }
     Zeg '  Windows Firewall vraagt de eerste keer om toestemming -- kies prive-netwerken.'
     Zeg "  Flash-instructies staan in $Doel\cyd\README-cyd.md"
 }

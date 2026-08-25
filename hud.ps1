@@ -414,6 +414,46 @@ $miDash = New-Object System.Windows.Forms.ToolStripMenuItem 'Dashboard openen'
 $miDash.Add_Click({ try { Start-Process (Join-Path $Root 'dashboard.html') } catch { } })
 [void]$menu.Items.Add($miDash)
 
+# ---- adres voor het touchscreen ---------------------------------------------
+<#
+  Deze pc heeft meestal meer dan een IPv4-adres: VirtualBox, WSL en Docker zetten
+  er elk een neer. Voor de CYD is er maar een bruikbaar, namelijk dat van de
+  interface waar de default route over loopt. Daarop selecteren we, in plaats van
+  "alles wat geen loopback is" -- dan krijg je 172.19.x en 192.168.56.x er gratis
+  bij en zit je te gokken welke je op het schermpje moet invullen.
+#>
+$ApiPort = 8787          # gelijk aan de standaard van session-api.ps1
+
+function Get-LanIp {
+    try {
+        $route = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop |
+                 Sort-Object RouteMetric, ifMetric | Select-Object -First 1
+        if ($route) {
+            $ip = Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $route.InterfaceIndex -ErrorAction Stop |
+                  Where-Object { $_.IPAddress -notlike '169.254.*' } |
+                  Select-Object -First 1 -ExpandProperty IPAddress
+            if ($ip) { return $ip }
+        }
+    } catch { }
+    # geen default route (geen netwerk): dan liever niets beloven
+    return $null
+}
+
+$miAdres = New-Object System.Windows.Forms.ToolStripMenuItem 'Adres van deze pc'
+$miAdres.ToolTipText = 'Klik om te kopieren'
+$miAdres.Add_Click({
+    $ip = Get-LanIp
+    if ($ip) { try { Set-Clipboard -Value "$($ip):$ApiPort" } catch { } }
+})
+[void]$menu.Items.Add($miAdres)
+
+$miStatus = New-Object System.Windows.Forms.ToolStripMenuItem 'Statuspagina openen'
+$miStatus.Add_Click({
+    $ip = Get-LanIp
+    if ($ip) { try { Start-Process "http://$($ip):$ApiPort/" } catch { } }
+})
+[void]$menu.Items.Add($miStatus)
+
 $miStart = New-Object System.Windows.Forms.ToolStripMenuItem 'Starten bij inloggen'
 $lnkDir  = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
 $lnkPath = Join-Path $lnkDir 'Claude HUD.lnk'
@@ -452,6 +492,22 @@ $miRestart.Add_Click({
 $miQuit = New-Object System.Windows.Forms.ToolStripMenuItem 'HUD afsluiten'
 $miQuit.Add_Click({ Save-Cfg; $tray.Visible = $false; $form.Close() })
 [void]$menu.Items.Add($miQuit)
+
+# Het adres pas bepalen als je het menu opent, niet eenmalig bij het starten:
+# na een router-herstart of een wisseling van netwerk klopt een onthouden adres
+# niet meer, en juist dat verouderde adres is waar je op het schermpje op vastloopt.
+$menu.Add_Opening({
+    $ip = Get-LanIp
+    if ($ip) {
+        $miAdres.Text    = "Adres van deze pc:  $($ip):$ApiPort"
+        $miAdres.Enabled = $true
+        $miStatus.Enabled = $true
+    } else {
+        $miAdres.Text    = 'Adres van deze pc:  geen netwerk'
+        $miAdres.Enabled = $false
+        $miStatus.Enabled = $false
+    }
+})
 
 $form.ContextMenuStrip = $menu
 $tray.ContextMenuStrip = $menu

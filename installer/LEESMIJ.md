@@ -10,7 +10,7 @@ ESP32) aan hangen, met drie mechanische toetsen om te reageren zonder je muis.
 ## Installeren
 
 Dubbelklik **`Installeer.cmd`**. Er worden drie dingen gevraagd: waar het
-mag komen, of je het touchscreen wilt gebruiken en of de HUD bij inloggen moet
+mag komen, of je het touchscreen wilt gebruiken en of alles bij inloggen moet
 starten. Administratorrechten zijn niet nodig.
 
 Standaard komt alles in `%LOCALAPPDATA%\ClaudeDeck`.
@@ -21,8 +21,10 @@ Wat de installatie doet:
 - de hooks van Claude Code koppelen in `%USERPROFILE%\.claude\settings.json`
   (met een backup, en bestaande verwijzingen naar een oudere versie worden
   bijgewerkt in plaats van verdubbeld)
-- snelkoppelingen maken in het startmenu
-- de HUD starten
+- snelkoppelingen maken in het startmenu, en bij "starten bij inloggen" ook in
+  je Startup-map -- de webservice voor het touchscreen komt daar mee, want zonder
+  die service staat het schermpje op "GEEN VERBINDING"
+- de HUD starten, en de webservice erbij als je het touchscreen koos
 
 Sessies die al draaien pikken de hooks pas op na een herstart van die sessie.
 
@@ -47,9 +49,10 @@ hebt afgesloten.
 
 ## Het touchscreen
 
-Kies je daarvoor, dan komt er een webservice mee. Start "Claude Deck API" uit je
-startmenu; Windows Firewall vraagt de eerste keer om toestemming (kies
-prive-netwerken). Op je telefoon of tablet kun je dan naar
+Kies je daarvoor, dan komt er een webservice mee. Die start meteen na de
+installatie, en met "starten bij inloggen" ook bij elke herstart van je pc.
+Handmatig starten kan via "Claude Deck API" in je startmenu. Windows Firewall
+vraagt de eerste keer om toestemming (kies prive-netwerken). Op je telefoon of tablet kun je dan naar
 `http://<ip-van-je-pc>:8787/` voor dezelfde lijst.
 
 Voor het echte schermpje: bouwinstructies, de Arduino-sketch en een printbare

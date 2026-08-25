@@ -770,6 +770,23 @@ void handleButtons() {
    erase), not in the code. That keeps passwords out of git and lets you move
    the thing to another network without USB -- which helps, because that cable
    is the unreliable part here. */
+/* Strip anything that has no business in a hostname or IP address. A phone
+   keyboard hands you a trailing space or a non-breaking space without showing it,
+   and HTTPClient then treats the result as a name to look up rather than an IP
+   literal -- so it spends its whole timeout on a DNS query that can never
+   succeed, and not one packet ever reaches the PC. Signal strength has nothing
+   to do with it, which is what made this so confusing to chase. */
+String schoonHost(const String& in) {
+  String uit;
+  for (size_t i = 0; i < in.length(); i++) {
+    char c = in[i];
+    bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
+              (c >= 'A' && c <= 'Z') || c == '.' || c == '-' || c == '_';
+    if (ok) uit += c;
+  }
+  return uit;
+}
+
 void leesInstellingen() {
   nvs.begin("claudedeck", true);          // true = read only
   cfgSsid = nvs.getString("ssid", WIFI_SSID_START);
@@ -778,6 +795,7 @@ void leesInstellingen() {
   cfgPort = nvs.getUShort("port", API_PORT_START);
   nvs.end();
   if (cfgPort == 0) cfgPort = 8787;
+  cfgHost = schoonHost(cfgHost);   // repareert ook een adres dat al fout in NVS staat
   Serial.printf("instellingen: ssid=\"%s\" host=%s:%u\n",
                 cfgSsid.c_str(), cfgHost.c_str(), cfgPort);
 }
@@ -895,7 +913,7 @@ void portaalOpslaan() {
     return;
   }
 
-  bewaarInstellingen(ssid, pass, host, port);
+  bewaarInstellingen(ssid, pass, schoonHost(host), port);
   portaalWeb.send(200, "text/html; charset=utf-8",
                   "<meta charset=utf-8><body style='background:#2A3238;color:#EEF3F5;"
                   "font:16px system-ui;padding:24px'>Opgeslagen. Het schermpje "

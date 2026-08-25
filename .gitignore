@@ -9,6 +9,13 @@ actions.log
 hud-config.json
 taak-prompt.txt
 
+# Compiler output. arduino-cli and the Arduino IDE drop this next to the sketch,
+# and a .map plus a .elf are 16 MB each -- they have no business in a repo. The
+# GitHub Actions workflow builds the firmware for the web flasher instead.
+cyd/**/build/
+*.elf
+*.map
+
 # temporary files from the atomic write
 *.tmp
 

@@ -90,6 +90,27 @@ function Read-DisplayCommand {
     return $script:pendingCmd
 }
 
+<#
+  Get a window forward, preferring the HUD.
+
+  The HUD is a GUI process and Windows lets it call SetForegroundWindow; this
+  service runs hidden under wscript and largely does not. So ask the HUD first,
+  and only fall back to doing it here if it does not answer -- the service must
+  keep working on a machine where the HUD is not running.
+
+  Returns @{ Found; Raised; Title }.
+#>
+function Resolve-DashFocus($sess) {
+    $viaHud = Request-DashFocus -Session $sess -Root $Root
+    if ($null -ne $viaHud) {
+        if ($viaHud.Found) { Write-DashLog "via HUD" }
+        return $viaHud
+    }
+    $w = Invoke-DashSessionFocus -Session $sess
+    if (-not $w) { return @{ Found = $false; Raised = $false; Title = ''; Handle = [IntPtr]::Zero } }
+    return @{ Found = $true; Raised = [bool]$w.Raised; Title = [string]$w.Title; Handle = $w.Handle }
+}
+
 function Get-ButtonLabel($def, [string]$btn) {
     if ($def -and $def.label)    { return [string]$def.label }
     if ($def -and $def.labelKey) { return (T ([string]$def.labelKey) @($def.minutes)) }
@@ -238,12 +259,19 @@ function Invoke-DashAction($sess, [string]$btn) {
         'keys' {
             $keys = [string]$def.send
             if (-not $keys) { return (T 'err.noKeys') }
-            $best = Get-DashBestWindow -Cwd ([string]$sess.cwd) -OwnerPid ([int]$sess.owner_pid)
-            if (-not $best) { Write-DashLog "$label -> $name : no window"; return (T 'err.noWindow') }
+            # Ook hier via de HUD: toetsen worden alleen gestuurd als het venster
+            # echt vooraan staat, en dat naar voren halen lukt vanuit deze
+            # verstopte service nauwelijks.
+            $f = Resolve-DashFocus $sess
+            if (-not $f.Found) { Write-DashLog "$label -> $name : no window"; return (T 'err.noWindow') }
+            if (-not $f.Raised) {
+                Write-DashLog "$label -> $name : window would not come forward, sent nothing"
+                return (T 'err.windowNotRaised')
+            }
             $delay = 250
             if ($cfg.keyDelayMs) { $delay = [int]$cfg.keyDelayMs }
-            if (Send-DashKeys -Handle $best.Handle -Keys $keys -DelayMs $delay) {
-                Write-DashLog "$label -> $name : '$keys' naar '$($best.Title)'"
+            if (Send-DashKeys -Handle $f.Handle -Keys $keys -DelayMs $delay) {
+                Write-DashLog "$label -> $name : '$keys' naar '$($f.Title)'"
                 return (T 'ok.action' @($label))
             }
             Write-DashLog "$label -> $name : venster kwam niet naar voren, niets gestuurd"
@@ -452,11 +480,11 @@ while ($true) {
                         $body = (T 'err.noSession')
                     } elseif ($path -eq '/focus') {
                         Reset-SessieCache
-                        $w = Invoke-DashSessionFocus -Session $sess
-                        if ($w -and $w.Raised) {
+                        $w = Resolve-DashFocus $sess
+                        if ($w.Found -and $w.Raised) {
                             Write-DashLog "TIK -> $($sess.name) : $($w.Title)"
                             $body = (T 'ok.action' @($sess.name))
-                        } elseif ($w) {
+                        } elseif ($w.Found) {
                             # Gevonden, maar Windows liet het niet naar voren komen.
                             # Dat is iets anders dan "geen venster", en het scherm
                             # hoort dat verschil te zien.

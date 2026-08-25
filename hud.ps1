@@ -607,6 +607,53 @@ $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = $RefreshMs
 $timer.Add_Tick({ Refresh-Now })
 
+<#
+  Raise windows on behalf of session-api.ps1.
+
+  A tap on the display used to have the API call SetForegroundWindow itself, and
+  Windows mostly ignored that: the API runs hidden under wscript and does not meet
+  the conditions for it. This process does -- it is a real GUI app with a window
+  the user interacts with. So the API leaves a request and we do the raising.
+
+  Its own timer at 250 ms rather than riding along on the 3-second refresh: a tap
+  has to feel immediate. All it does on a quiet tick is ask whether a file exists,
+  which costs nothing.
+#>
+$focusTimer = New-Object System.Windows.Forms.Timer
+$focusTimer.Interval = 250
+$focusTimer.Add_Tick({
+    $req = Read-DashFocusRequest $Root
+    if (-not $req) { return }
+
+    $sess = $null
+    foreach ($s in @($state.rows)) {
+        if ([string]$s.session_id -eq [string]$req.id) { $sess = $s; break }
+    }
+    if (-not $sess) {
+        # The HUD only holds visible sessions. Read the full list rather than
+        # answering "not found" for something that does exist.
+        try {
+            $alles = @(Get-DashSessions -Dir $StatusDir -SnoozeFile (Join-Path $Root 'snooze.json'))
+            foreach ($s in $alles) {
+                if ([string]$s.session_id -eq [string]$req.id) { $sess = $s; break }
+            }
+        } catch { }
+    }
+    if (-not $sess) {
+        Write-DashFocusResult -Root $Root -Nonce $req.nonce -Found $false -Ok $false -Title ''
+        return
+    }
+
+    $w = Invoke-DashSessionFocus -Session $sess
+    if ($w) {
+        Write-DashFocusResult -Root $Root -Nonce $req.nonce -Found $true `
+            -Ok ([bool]$w.Raised) -Title ([string]$w.Title) -Handle $w.Handle
+    } else {
+        Write-DashFocusResult -Root $Root -Nonce $req.nonce -Found $false -Ok $false -Title ''
+    }
+})
+$focusTimer.Start()
+
 $form.Add_Shown({
     # WS_EX_COMPOSITED makes Windows draw the whole window into a buffer; together
     # with DoubleBuffered that is the end of the flicker.

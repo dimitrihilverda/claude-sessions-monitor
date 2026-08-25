@@ -5,6 +5,8 @@ sessions.js
 sessions.json
 session-status/
 snooze.json
+focus-request.json
+focus-result.json
 actions.log
 hud-config.json
 taak-prompt.txt

@@ -81,18 +81,59 @@ $DashHostProcs = @(
 # Parent chain of the Claude process, with a start-time check: if the real
 # parent has already exited, ParentProcessId points at a reused PID and you
 # would end up at some unrelated window.
+<#
+  The process table, fetched in one go and kept for a moment.
+
+  Walking a parent chain used to cost one filtered CIM query per level, and a
+  single one of those takes about 640 ms on this machine -- four levels came to
+  two full seconds. One unfiltered query returns all 566 processes in roughly
+  550 ms, so we ask once and walk it in memory: a fixed cost instead of one that
+  grows with the depth of the chain.
+
+  The short cache matters for the case that hurt: raising a window does several
+  chain walks in a row while scoring candidate windows. Without it each one paid
+  the query again. Two seconds is short enough that a process which has since
+  exited is still caught by the liveness checks elsewhere.
+#>
+$script:DashProcTable   = $null
+$script:DashProcTableAt = [datetime]::MinValue
+
+function Get-DashProcTable {
+    if ($null -ne $script:DashProcTable -and
+        ([datetime]::UtcNow - $script:DashProcTableAt).TotalMilliseconds -lt 2000) {
+        return $script:DashProcTable
+    }
+    $tab = @{}
+    try {
+        foreach ($p in (Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate,Name -ErrorAction Stop)) {
+            $tab[[int]$p.ProcessId] = @{
+                Parent = [int]$p.ParentProcessId
+                Start  = $p.CreationDate
+                Name   = [string]$p.Name
+            }
+        }
+    } catch { }
+    $script:DashProcTable   = $tab
+    $script:DashProcTableAt = [datetime]::UtcNow
+    return $tab
+}
+
 function Get-DashProcChain([int]$startPid) {
+    $tab = Get-DashProcTable
     $chain = @()
     $id = $startPid
     $childStart = $null
     for ($i = 0; $i -lt 8 -and $id -gt 4; $i++) {
-        $ci = Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue
-        if (-not $ci) { break }
-        $start = $ci.CreationDate
+        if (-not $tab.ContainsKey($id)) { break }
+        $p = $tab[$id]
+        $start = $p.Start
+        # A parent that started later than its child means the real parent has
+        # exited and this PID has been reused; stop rather than follow it to a
+        # window that has nothing to do with this session.
         if ($childStart -and $start -and $start -gt $childStart) { break }
         $chain += [int]$id
         $childStart = $start
-        $id = [int]$ci.ParentProcessId
+        $id = [int]$p.Parent
     }
     return $chain
 }
@@ -183,13 +224,125 @@ function Show-DashWindow {
                 if ($vast) { [void][Dash.Win]::AttachThreadInput($eigen, $doel, $false) }
             }
             Start-Sleep -Milliseconds 60
+            if ([Dash.Win]::GetForegroundWindow() -eq $Handle) { return $true }
         }
+
+        <#
+          Last resort, through the shell. Windows blocks a process from taking the
+          foreground for a while after somebody else just took it, and none of the
+          calls above get past that. AppActivate goes via WScript.Shell, which does
+          the activation dance the shell is allowed to do, and it demonstrably
+          raises windows the calls above give up on -- including Windows Terminal.
+        #>
+        try {
+            $procId = 0
+            [void][Dash.Win]::ThreadOf($Handle, [IntPtr]::Zero)
+            $sh = New-Object -ComObject WScript.Shell
+            foreach ($p in @(Get-Process -ErrorAction SilentlyContinue)) {
+                if ($p.MainWindowHandle -eq $Handle) { $procId = $p.Id; break }
+            }
+            if ($procId -gt 0) { [void]$sh.AppActivate([int]$procId) }
+            Start-Sleep -Milliseconds 150
+        } catch { }
+
         return ([Dash.Win]::GetForegroundWindow() -eq $Handle)
     } catch { return $false }
 }
 
 # Brings a session's window to the front. Returns the chosen window, or $null
 # if nothing matched.
+<#
+  Raising a window through the HUD instead of doing it ourselves.
+
+  Windows only grants SetForegroundWindow to a process that meets certain
+  conditions, and session-api.ps1 does not: it runs hidden under wscript. The HUD
+  is a real GUI process and does. Same code, different standing -- which is why
+  clicking in the HUD always worked while a tap on the display often did not.
+
+  So the API asks instead of trying. It drops a request file; the HUD picks it up
+  on a short timer, raises the window with its own rights, and writes the outcome
+  back. The API waits briefly for that answer so the display still learns whether
+  it worked.
+
+  Deliberately a file rather than a pipe or a window message: the HUD is a
+  single-threaded WinForms app, and a blocking read would freeze its UI. Checking
+  whether a file exists, four times a second, costs nothing.
+
+  The nonce matters. Without it a reply to an earlier request could be mistaken
+  for the answer to this one, and you would be told a different window came
+  forward than the one you tapped.
+#>
+function Get-DashFocusPaths([string]$Root) {
+    return @{
+        Request = (Join-Path $Root 'focus-request.json')
+        Result  = (Join-Path $Root 'focus-result.json')
+    }
+}
+
+# --- API side -----------------------------------------------------------------
+function Request-DashFocus {
+    param(
+        [Parameter(Mandatory = $true)]$Session,
+        [Parameter(Mandatory = $true)][string]$Root,
+        [int]$TimeoutMs = 1500
+    )
+    $paden = Get-DashFocusPaths $Root
+    $nonce = [guid]::NewGuid().ToString()
+    try {
+        @{ id = [string]$Session.session_id; nonce = $nonce
+           at = (Get-Date).ToString('o') } | ConvertTo-Json -Compress |
+            Set-Content -Path $paden.Request -Encoding UTF8
+    } catch { return $null }
+
+    $klaar = [datetime]::UtcNow.AddMilliseconds($TimeoutMs)
+    while ([datetime]::UtcNow -lt $klaar) {
+        Start-Sleep -Milliseconds 60
+        if (-not (Test-Path $paden.Result)) { continue }
+        try {
+            $r = Get-Content $paden.Result -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($r.nonce -ne $nonce) { continue }      # antwoord op een ouder verzoek
+            Remove-Item $paden.Result -Force -ErrorAction SilentlyContinue
+            if (-not $r.found) { return @{ Found = $false; Raised = $false; Title = ''; Handle = [IntPtr]::Zero } }
+            # A window handle is valid across processes, so the HUD can hand it
+            # over and we skip searching for the same window twice.
+            $h = [IntPtr]::Zero
+            try { if ($r.handle) { $h = [IntPtr][int64]$r.handle } } catch { }
+            return @{ Found = $true; Raised = [bool]$r.ok; Title = [string]$r.title; Handle = $h }
+        } catch { }
+    }
+    # Geen HUD, of hij reageerde niet. Verzoek opruimen, anders wordt het later
+    # alsnog uitgevoerd en springt er zomaar een venster naar voren.
+    Remove-Item $paden.Request -Force -ErrorAction SilentlyContinue
+    return $null
+}
+
+# --- HUD side -----------------------------------------------------------------
+function Read-DashFocusRequest([string]$Root) {
+    $paden = Get-DashFocusPaths $Root
+    if (-not (Test-Path $paden.Request)) { return $null }
+    try {
+        $r = Get-Content $paden.Request -Raw -Encoding UTF8 | ConvertFrom-Json
+        Remove-Item $paden.Request -Force -ErrorAction SilentlyContinue
+        # Ouder dan een paar seconden: de vrager wacht niet meer, dus niets doen.
+        try { if (((Get-Date) - [datetime]$r.at).TotalSeconds -gt 5) { return $null } } catch { }
+        return $r
+    } catch {
+        Remove-Item $paden.Request -Force -ErrorAction SilentlyContinue
+        return $null
+    }
+}
+
+function Write-DashFocusResult {
+    param([string]$Root, [string]$Nonce, [bool]$Found, [bool]$Ok, [string]$Title, $Handle = 0)
+    $paden = Get-DashFocusPaths $Root
+    try {
+        $h = 0
+        try { $h = [int64]$Handle } catch { }
+        @{ nonce = $Nonce; found = $Found; ok = $Ok; title = $Title; handle = $h } |
+            ConvertTo-Json -Compress | Set-Content -Path $paden.Result -Encoding UTF8
+    } catch { }
+}
+
 function Invoke-DashSessionFocus {
     param($Session, [switch]$FolderFallback)
 

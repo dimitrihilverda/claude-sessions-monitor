@@ -1,3 +1,3 @@
 @echo off
-rem Dubbelklik dit bestand om Claude Deck te installeren.
+rem Double-click this file to install Claude Sessions Monitor.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"

@@ -45,7 +45,7 @@ function Stop-Netjes($tekst) {
 if ($bron -match '\\Temp\\Temp\d*_' -or $bron -match '\.zip\\') {
     Stop-Netjes ("  Je draait dit vanuit het zipbestand zelf.`r`n" +
                  "  Pak de map eerst uit (rechtermuis op de zip -> Alles uitpakken)`r`n" +
-                 "  en dubbelklik daarna Installeer.cmd in de uitgepakte map.")
+                 "  then double-click Install.cmd in the unpacked folder.")
 }
 if ($PSVersionTable.PSVersion.Major -lt 5) {
     Stop-Netjes "  PowerShell 5.1 of nieuwer is nodig; je hebt $($PSVersionTable.PSVersion)."
@@ -75,9 +75,9 @@ Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='wscript.ex
 Kop 'Bestanden neerzetten'
 New-Item -ItemType Directory -Force -Path $Doel | Out-Null
 
-$kern = @('sessionlib.ps1', 'focuslib.ps1', 'beacon.ps1', 'hud.ps1', 'hud.vbs',
+$kern = @('sessionlib.ps1', 'focuslib.ps1', 'langlib.ps1', 'beacon.ps1', 'hud.ps1', 'hud.vbs',
           'check-titels.ps1', 'zoek-titel.ps1', 'diagnose.ps1', 'Diagnose.cmd',
-          'uninstall.ps1', 'LEESMIJ.md')
+          'uninstall.ps1', 'README-installer.md')
 $touch = @('session-api.ps1', 'api.vbs', 'actions.json')
 
 foreach ($f in $kern) {

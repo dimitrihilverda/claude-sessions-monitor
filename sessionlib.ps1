@@ -22,6 +22,16 @@ $DashHideCwds = @()
 #              permissievraag hebt goedgekeurd)
 #  done      = Claude is klaar met antwoorden (Stop) -- geen alarm, jouw beurt
 #  ended     = sessie afgesloten (SessionEnd) -> niet tonen, opruimen
+<#
+  De statuslabels komen uit langlib.ps1. Die halen we hier binnen en niet in
+  elk aanroepend script: beacon.ps1, check-titels.ps1 en zoek-titel.ps1 laden
+  alleen sessionlib, en zouden anders op een ontbrekende T stukgaan.
+  De guard voorkomt dubbel laden als de aanroeper hem al had.
+#>
+if (-not (Get-Command T -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot 'langlib.ps1')
+}
+
 function Get-DashState([string]$ev) {
     switch ($ev) {
         'Notification'     { return 'attention' }
@@ -36,12 +46,13 @@ function Get-DashState([string]$ev) {
 }
 
 function Get-DashStateLabel([string]$state) {
+    # De teksten staan in langlib.ps1, zodat ze de taal van Windows volgen.
     switch ($state) {
-        'attention' { return 'Aandacht nodig' }
-        'active'    { return 'Actief' }
-        'done'      { return 'Klaar' }
-        'ended'     { return 'Afgerond' }
-        default     { return 'Onbekend' }
+        'attention' { return (T 'state.attention') }
+        'active'    { return (T 'state.active') }
+        'done'      { return (T 'state.done') }
+        'ended'     { return (T 'state.ended') }
+        default     { return (T 'state.unknown') }
     }
 }
 
@@ -367,7 +378,7 @@ function Get-DashSessions {
             source     = $bron
             tab        = ''
             host       = ''
-            label      = $(if ($snoozedUntil) { 'Snooze tot ' + $snoozedUntil.ToString('HH:mm') } else { Get-DashStateLabel $state })
+            label      = $(if ($snoozedUntil) { (T 'state.snoozeUntil' @($snoozedUntil.ToString('HH:mm'))) } else { Get-DashStateLabel $state })
             snoozed    = [bool]$snoozedUntil
             why        = $why
             updated    = $upd.ToString('yyyy-MM-ddTHH:mm:sszzz')

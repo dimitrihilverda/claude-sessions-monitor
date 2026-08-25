@@ -16,14 +16,15 @@ NAAM = "ClaudeDeck"
 
 # (bron, pad in het zipje)
 BESTANDEN = [
-    ("installer/Installeer.cmd", "Installeer.cmd"),
+    ("installer/Install.cmd",     "Install.cmd"),
     ("installer/install.ps1",    "install.ps1"),
     ("installer/uninstall.ps1",  "uninstall.ps1"),
-    ("installer/LEESMIJ.md",     "LEESMIJ.md"),
+    ("installer/README-installer.md", "README-installer.md"),
     ("installer/Diagnose.cmd",   "Diagnose.cmd"),
     ("diagnose.ps1",             "diagnose.ps1"),
     ("sessionlib.ps1",           "sessionlib.ps1"),
     ("focuslib.ps1",             "focuslib.ps1"),
+    ("langlib.ps1",              "langlib.ps1"),
     ("beacon.ps1",               "beacon.ps1"),
     ("hud.ps1",                  "hud.ps1"),
     ("hud.vbs",                  "hud.vbs"),

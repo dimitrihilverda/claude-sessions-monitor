@@ -69,6 +69,7 @@ function Save-Cfg {
 # De vensterzoeker zit in focuslib.ps1, zodat de HUD en de CYD-API dezelfde
 # logica gebruiken.
 . (Join-Path $Root 'focuslib.ps1')
+. (Join-Path $Root 'langlib.ps1')
 
 function Show-SessionWindow($sess, [switch]$Explain) {
     $cwd = [string]$sess.cwd
@@ -91,7 +92,7 @@ function Show-SessionWindow($sess, [switch]$Explain) {
         if (-not $cands.Count) { $txt += "  (geen enkel venster gaf een treffer)`n" }
         $best = if ($cands.Count -and $cands[0].Score -ge 30) { $cands[0] } else { $null }
         $txt += "`nGekozen: " + $(if ($best) { "$($best.Title)  [score $($best.Score)]" } else { 'niets -- opent de map' })
-        [void][System.Windows.Forms.MessageBox]::Show($txt, 'Vensterkeuze', 'OK', 'Information')
+        [void][System.Windows.Forms.MessageBox]::Show($txt, (T 'notify.pickWindow'), 'OK', 'Information')
         return
     }
 
@@ -100,7 +101,7 @@ function Show-SessionWindow($sess, [switch]$Explain) {
     $w = Invoke-DashSessionFocus -Session $sess
     if (-not $w) {
         try {
-            $tray.ShowBalloonTip(4000, 'Geen venster gevonden',
+            $tray.ShowBalloonTip(4000, (T 'notify.noWindow'),
                 "Voor '$($sess.name)' is geen venster te vinden. Shift+klik opent de map.", 'Info')
         } catch { }
     }
@@ -108,7 +109,7 @@ function Show-SessionWindow($sess, [switch]$Explain) {
 
 # ---- het venster ------------------------------------------------------------
 $form                 = New-Object System.Windows.Forms.Form
-$form.Text            = 'Claude-sessies'
+$form.Text            = (T 'app.title')
 $form.FormBorderStyle = 'None'
 $form.BackColor       = $C.Bg
 $form.ShowInTaskbar   = $false
@@ -221,7 +222,7 @@ $form.Add_Paint({
     $g.FillEllipse($db, 12, 12, 8, 8); $db.Dispose()
 
     $tb = New-Object System.Drawing.SolidBrush $C.Text
-    $g.DrawString('CLAUDE-SESSIES', $F.Head, $tb, 26, 7)
+    $g.DrawString((T 'app.header'), $F.Head, $tb, 26, 7)
     $tb.Dispose()
 
     $mb = New-Object System.Drawing.SolidBrush $C.Muted
@@ -244,13 +245,13 @@ $form.Add_Paint({
         if ($cfg.onlyAttention) {
             # anders lijkt de HUD kapot terwijl er alleen een filter aan staat
             $ob = New-Object System.Drawing.SolidBrush $C.Orange
-            $g.DrawString('Geen sessie vraagt aandacht.', $F.Why, $eb, 14, ($y + 6))
-            $g.DrawString('Filter "alleen aandacht nodig" staat aan — rechtermuis om hem uit te zetten.',
+            $g.DrawString((T 'empty.filtered'), $F.Why, $eb, 14, ($y + 6))
+            $g.DrawString((T 'empty.filterHint'),
                           $F.Small, $ob, 14, ($y + 24))
             $ob.Dispose()
         } else {
-            $g.DrawString('Geen actieve sessies.', $F.Why, $eb, 14, ($y + 6))
-            $g.DrawString("$($state.known) beacons bekend", $F.Small, $eb, 14, ($y + 24))
+            $g.DrawString((T 'empty.none'), $F.Why, $eb, 14, ($y + 6))
+            $g.DrawString((T 'empty.beacons' @($state.known)), $F.Small, $eb, 14, ($y + 24))
         }
         $eb.Dispose()
         return
@@ -325,7 +326,7 @@ function Refresh-Now {
             if (-not $state.seen.ContainsKey($key)) {
                 $state.seen[$key] = $true
                 try { [System.Media.SystemSounds]::Exclamation.Play() } catch { }
-                try { $tray.ShowBalloonTip(6000, "Claude wacht op je: $($r.name)", [string]$r.why, 'Warning') } catch { }
+                try { $tray.ShowBalloonTip(6000, (T 'notify.waiting' @($r.name)), [string]$r.why, 'Warning') } catch { }
             }
         }
 
@@ -393,24 +394,24 @@ function Add-Check($text, $checked, $action) {
     return $mi
 }
 
-$miTop = Add-Check 'Altijd bovenop' $cfg.topmost {
+$miTop = Add-Check (T 'menu.topmost') $cfg.topmost {
     $cfg.topmost = -not $cfg.topmost
     $form.TopMost = [bool]$cfg.topmost
     Save-Cfg
 }
-$miCompact = Add-Check 'Compacte rijen' $cfg.compact {
+$miCompact = Add-Check (T 'menu.compact') $cfg.compact {
     $cfg.compact = -not $cfg.compact
     $state.lastCount = -1
     Save-Cfg; Refresh-Now
 }
-$miOnly = Add-Check 'Alleen aandacht nodig (verbergt de rest)' $cfg.onlyAttention {
+$miOnly = Add-Check (T 'menu.onlyAttention') $cfg.onlyAttention {
     $cfg.onlyAttention = -not $cfg.onlyAttention
     $state.lastCount = -1
     Save-Cfg; Refresh-Now
 }
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 
-$miDash = New-Object System.Windows.Forms.ToolStripMenuItem 'Dashboard openen'
+$miDash = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.dashboard')
 $miDash.Add_Click({ try { Start-Process (Join-Path $Root 'dashboard.html') } catch { } })
 [void]$menu.Items.Add($miDash)
 
@@ -439,22 +440,22 @@ function Get-LanIp {
     return $null
 }
 
-$miAdres = New-Object System.Windows.Forms.ToolStripMenuItem 'Adres van deze pc'
-$miAdres.ToolTipText = 'Klik om te kopieren'
+$miAdres = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.address')
+$miAdres.ToolTipText = (T 'menu.addressTip')
 $miAdres.Add_Click({
     $ip = Get-LanIp
     if ($ip) { try { Set-Clipboard -Value "$($ip):$ApiPort" } catch { } }
 })
 [void]$menu.Items.Add($miAdres)
 
-$miStatus = New-Object System.Windows.Forms.ToolStripMenuItem 'Statuspagina openen'
+$miStatus = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.statusPage')
 $miStatus.Add_Click({
     $ip = Get-LanIp
     if ($ip) { try { Start-Process "http://$($ip):$ApiPort/" } catch { } }
 })
 [void]$menu.Items.Add($miStatus)
 
-$miStart = New-Object System.Windows.Forms.ToolStripMenuItem 'Starten bij inloggen'
+$miStart = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.autostart')
 $lnkDir  = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
 $lnkPath = Join-Path $lnkDir 'Claude HUD.lnk'
 $miStart.CheckOnClick = $true
@@ -468,7 +469,7 @@ $miStart.Add_Click({
             $sc.TargetPath = 'wscript.exe'
             $sc.Arguments  = '"' + (Join-Path $Root 'hud.vbs') + '"'
             $sc.WorkingDirectory = $Root
-            $sc.Description = 'Claude-sessies HUD'
+            $sc.Description = (T 'hud.shortcutDesc')
             $sc.Save()
         }
     } catch { }
@@ -480,7 +481,7 @@ $miStart.Add_Click({
 # Herstarten start de nieuwe HUD pas nadat deze is afgesloten (zie onderaan het
 # script). Anders draaien er even twee tegelijk en schrijven ze allebei naar
 # hud-config.json en sessions.json.
-$miRestart = New-Object System.Windows.Forms.ToolStripMenuItem 'HUD herstarten'
+$miRestart = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.restart')
 $miRestart.Add_Click({
     $state.restart = $true
     Save-Cfg
@@ -489,7 +490,7 @@ $miRestart.Add_Click({
 })
 [void]$menu.Items.Add($miRestart)
 
-$miQuit = New-Object System.Windows.Forms.ToolStripMenuItem 'HUD afsluiten'
+$miQuit = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.quit')
 $miQuit.Add_Click({ Save-Cfg; $tray.Visible = $false; $form.Close() })
 [void]$menu.Items.Add($miQuit)
 
@@ -497,13 +498,22 @@ $miQuit.Add_Click({ Save-Cfg; $tray.Visible = $false; $form.Close() })
 # na een router-herstart of een wisseling van netwerk klopt een onthouden adres
 # niet meer, en juist dat verouderde adres is waar je op het schermpje op vastloopt.
 $menu.Add_Opening({
+    <#
+      dashboard.html is een eigen, persoonlijke pagina die niet met dit project
+      meegeleverd wordt (hij staat in .gitignore: er staat privedata in). Heeft
+      iemand hem niet, dan hoort er ook geen menu-item naar te wijzen. We kijken
+      bij het openen van het menu, niet eenmalig, zodat hij verschijnt zodra je
+      er alsnog een neerzet.
+    #>
+    $miDash.Visible = (Test-Path (Join-Path $Root 'dashboard.html'))
+
     $ip = Get-LanIp
     if ($ip) {
-        $miAdres.Text    = "Adres van deze pc:  $($ip):$ApiPort"
+        $miAdres.Text    = (T 'menu.addressWith' @("$($ip):$ApiPort"))
         $miAdres.Enabled = $true
         $miStatus.Enabled = $true
     } else {
-        $miAdres.Text    = 'Adres van deze pc:  geen netwerk'
+        $miAdres.Text    = (T 'menu.addressNone')
         $miAdres.Enabled = $false
         $miStatus.Enabled = $false
     }

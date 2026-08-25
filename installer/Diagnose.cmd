@@ -1,3 +1,3 @@
 @echo off
-rem Dubbelklik dit bestand als de HUD niets laat zien.
+rem Double-click this file when the HUD shows nothing.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0diagnose.ps1"

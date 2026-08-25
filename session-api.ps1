@@ -34,6 +34,7 @@ $ErrorActionPreference = 'Continue'
 $Root = $PSScriptRoot
 . (Join-Path $Root 'sessionlib.ps1')
 . (Join-Path $Root 'focuslib.ps1')
+. (Join-Path $Root 'langlib.ps1')
 
 $StatusDir   = Join-Path $Root 'session-status'
 $ActionsPath = Join-Path $Root 'actions.json'
@@ -78,8 +79,33 @@ function Format-Cyd($p) {
         $labels += ($l -replace '[\r\n\|;]', ' ')
     }
 
+    <#
+      De kopregel draagt ook de teksten voor het schermpje, zodat de CYD de taal
+      van deze pc volgt zonder eigen tabel en zonder opnieuw te flashen.
+
+        veld 1  #<attention>
+        veld 2  <active>
+        veld 3  <done>
+        veld 4  <HH:mm>            -- zonder seconden: op een klein scherm is
+                                      een meetellende secondeteller alleen onrust
+        veld 5  knoplabels          gescheiden door ;
+        veld 6  kopregeltekst       al samengesteld hier, want alleen de pc weet
+                                    of het "1 needs you" of "2 need you" is
+        veld 7  statuslabels        attention;active;done;geen-sessies
+    #>
+    $kop =
+        if     ($p.attention -gt 0) { T 'cyd.waitingCount' @($p.attention, $(if ($p.attention -eq 1) { '' } else { $(if ($script:DashLang -eq 'nl') { 'EN' } else { '' }) })) }
+        elseif ($p.active    -gt 0) { T 'cyd.activeCount'  @($p.active) }
+        else                        { T 'cyd.idle' }
+
+    $statusLabels = @(
+        (T 'cyd.attention'), (T 'cyd.active'), (T 'cyd.done'), (T 'cyd.noSessions')
+    ) -join ';'
+
     $sb = New-Object System.Text.StringBuilder
-    [void]$sb.Append('#').Append($p.attention).Append('|').Append($p.active).Append('|').Append($p.done).Append('|').Append((Get-Date).ToString('HH:mm:ss')).Append('|').Append(($labels -join ';')).Append("`n")
+    [void]$sb.Append('#').Append($p.attention).Append('|').Append($p.active).Append('|').Append($p.done).Append('|').Append((Get-Date).ToString('HH:mm')).Append('|').Append(($labels -join ';')).Append('|').Append(($kop -replace '[
+
+\|;]', ' ')).Append('|').Append($statusLabels).Append("`n")
     foreach ($s in $p.sessions) {
         $why = ([string]$s.why -replace '[\r\n\|]', ' ')
         # de naam is de titel van de sessie; zet de map ervoor in de tweede regel
@@ -100,19 +126,19 @@ function Format-Html($p) {
         $sid = [System.Web.HttpUtility]::UrlEncode([string]$s.session_id)
         $rows += "<a class=r href='/focus?id=$sid' style='border-left-color:$col'><b>$nm</b> <span class=c style='color:$col'>$($s.label)</span><br><small>$($s.since) &middot; $why</small></a>"
     }
-    if (-not $rows) { $rows = "<div class=r><small>Geen actieve sessies.</small></div>" }
+    if (-not $rows) { $rows = "<div class=r><small>$(T empty.none)</small></div>" }
     return @"
 <!DOCTYPE html><html lang=nl><head><meta charset=utf-8>
 <meta name=viewport content='width=device-width,initial-scale=1'>
-<meta http-equiv=refresh content=5><title>Claude-sessies</title><style>
+<meta http-equiv=refresh content=5><title>$(T 'web.title')</title><style>
 body{background:#1F262F;color:#F0F4F9;font:15px/1.5 'Segoe UI',system-ui,sans-serif;margin:0;padding:16px}
 h1{font-size:13px;letter-spacing:1.2px;text-transform:uppercase;color:#8A97A6;margin:0 0 12px}
 .r{display:block;background:#262E38;border-left:3px solid #9BB0C7;border-radius:8px;padding:10px 12px;margin-bottom:8px;color:inherit;text-decoration:none}
 .c{float:right;font-size:11px;text-transform:uppercase;letter-spacing:.6px}
 small{color:#8A97A6}</style></head><body>
-<h1>Claude-sessies &middot; $($p.attention) wachten &middot; $($p.active) actief</h1>
+<h1>$(T 'web.summary' @($p.attention, $p.active))</h1>
 $rows
-<small>bijgewerkt $((Get-Date).ToString('HH:mm:ss')) &middot; tik een rij aan om dat venster naar voren te halen</small>
+<small>$(T 'web.updated' @((Get-Date).ToString('HH:mm:ss'))) &middot; $(T 'web.tapHint')</small>
 </body></html>
 "@
 }
@@ -138,10 +164,10 @@ function Set-DashSnooze([string]$sid, [int]$minutes) {
 # ---- knopacties -------------------------------------------------------------
 function Invoke-DashAction($sess, [string]$btn) {
     $cfg = Get-Actions
-    if (-not $cfg) { return 'err geen actions.json' }
+    if (-not $cfg) { return (T 'err.noActions') }
     $def = $null
     if ($cfg.buttons -and $cfg.buttons.PSObject.Properties[$btn]) { $def = $cfg.buttons.$btn }
-    if (-not $def) { return "err knop $btn niet ingesteld" }
+    if (-not $def) { return (T 'err.buttonUnset' @($btn)) }
 
     $label = if ($def.label) { [string]$def.label } else { "knop $btn" }
     $type  = ([string]$def.type).ToLower()
@@ -151,29 +177,29 @@ function Invoke-DashAction($sess, [string]$btn) {
     # mag geen Enter in een sessie duwen die gewoon aan het werk is.
     if ($def.requireAttention -and $sess.state -ne 'attention') {
         Write-DashLog "GEWEIGERD $label op $name -- sessie vraagt geen aandacht (state=$($sess.state))"
-        return "err $label kan alleen als die sessie wacht"
+        return (T 'err.needsAttention' @($label))
     }
 
     switch ($type) {
         'focus' {
             $w = Invoke-DashSessionFocus -Session $sess
-            if ($w) { Write-DashLog "$label -> $name : $($w.Title)"; return "ok $label" }
+            if ($w) { Write-DashLog "$label -> $name : $($w.Title)"; return (T 'ok.action' @($label)) }
             Write-DashLog "$label -> $name : geen venster gevonden"
-            return 'err geen venster'
+            return (T 'err.noWindow')
         }
         'keys' {
             $keys = [string]$def.send
-            if (-not $keys) { return 'err geen toetsen ingesteld' }
+            if (-not $keys) { return (T 'err.noKeys') }
             $best = Get-DashBestWindow -Cwd ([string]$sess.cwd) -OwnerPid ([int]$sess.owner_pid)
-            if (-not $best) { Write-DashLog "$label -> $name : geen venster"; return 'err geen venster' }
+            if (-not $best) { Write-DashLog "$label -> $name : geen venster"; return (T 'err.noWindow') }
             $delay = 250
             if ($cfg.keyDelayMs) { $delay = [int]$cfg.keyDelayMs }
             if (Send-DashKeys -Handle $best.Handle -Keys $keys -DelayMs $delay) {
                 Write-DashLog "$label -> $name : '$keys' naar '$($best.Title)'"
-                return "ok $label"
+                return (T 'ok.action' @($label))
             }
             Write-DashLog "$label -> $name : venster kwam niet naar voren, niets gestuurd"
-            return 'err venster niet actief'
+            return (T 'err.windowNotActive')
         }
         'snooze' {
             $min = 10
@@ -182,23 +208,23 @@ function Invoke-DashAction($sess, [string]$btn) {
                 Write-DashLog "$label -> $name : $min minuten stil"
                 return "ok $min min stil"
             }
-            return 'err snooze mislukt'
+            return (T 'err.snoozeFailed')
         }
         'run' {
             $cmd = ([string]$def.command) -replace '\{cwd\}', [string]$sess.cwd
-            if (-not $cmd) { return 'err geen command' }
+            if (-not $cmd) { return (T 'err.noCommand') }
             try {
                 # niet $args gebruiken: dat is een automatische variabele
                 $argstr = ([string]$def.args) -replace '\{cwd\}', [string]$sess.cwd
                 if ($argstr) { Start-Process -FilePath $cmd -ArgumentList $argstr } else { Start-Process -FilePath $cmd }
                 Write-DashLog "$label -> $name : $cmd $argstr"
-                return "ok $label"
-            } catch { return 'err start mislukt' }
+                return (T 'ok.action' @($label))
+            } catch { return (T 'err.startFailed') }
         }
         'open' {
             $path = ([string]$def.path) -replace '\{cwd\}', [string]$sess.cwd
-            if (-not $path) { return 'err geen path' }
-            try { Start-Process $path; Write-DashLog "$label -> $name : $path"; return "ok $label" }
+            if (-not $path) { return (T 'err.noPath') }
+            try { Start-Process $path; Write-DashLog "$label -> $name : $path"; return (T 'ok.action' @($label)) }
             catch { return 'err openen mislukt' }
         }
         default { return "err onbekend type '$type'" }
@@ -305,7 +331,7 @@ while ($true) {
                 $cfg = Get-Actions
                 $token = if ($cfg -and $cfg.token) { [string]$cfg.token } else { '' }
                 if ($token -and $q['t'] -ne $token) {
-                    $body = 'err token'
+                    $body = (T 'err.badToken')
                 } else {
                     $sid  = [string]$q['id']
                     $sess = $null
@@ -317,13 +343,13 @@ while ($true) {
                         $sess = @($all | Where-Object { $_.visible -and $_.state -eq 'attention' } | Sort-Object sort_ts)[0]
                     }
                     if (-not $sess) {
-                        $body = 'err geen sessie'
+                        $body = (T 'err.noSession')
                     } elseif ($path -eq '/focus') {
                         Reset-SessieCache
                         $w = Invoke-DashSessionFocus -Session $sess
                         if ($w) {
                             Write-DashLog "TIK -> $($sess.name) : $($w.Title)"
-                            $body = "ok $($sess.name)"
+                            $body = (T 'ok.action' @($sess.name))
                         } else {
                             Write-DashLog "TIK -> $($sess.name) : geen venster gevonden"
                             $body = 'err geen venster'

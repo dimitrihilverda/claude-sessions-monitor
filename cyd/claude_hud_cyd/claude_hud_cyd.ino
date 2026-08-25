@@ -156,8 +156,32 @@ Sess     rows[MAX_ROWS];
 int      nRows = 0;
 int      nAtt = 0, nAct = 0, nDone = 0;
 int      selIdx = 0;
-String   clockTxt = "--:--:--";
-String   btnLabel[3] = { "Knop 1", "Knop 2", "Knop 3" };
+String   clockTxt = "--:--";
+String   btnLabel[3] = { "Button 1", "Button 2", "Button 3" };
+
+/* Teksten die de pc aanlevert in de kopregel van /cyd.txt, zodat het schermpje
+   de taal van Windows volgt zonder eigen tabel en zonder opnieuw te flashen.
+   De waarden hieronder zijn alleen de terugval voor voordat er ooit een
+   antwoord binnenkwam. */
+String   uiHeader   = "CLAUDE";
+String   uiState[3] = { "NEEDS YOU", "WORKING", "DONE" };   // attention, active, done
+String   uiEmpty    = "No active sessions.";
+
+/* Deze vier zijn per se lokaal: ze staan juist in beeld als er GEEN verbinding
+   is, dus dan kan de pc ze niet aanleveren. Zet CYD_LANG_NL op 1 als je het
+   schermpje in het Nederlands wilt als hij offline is. */
+#define CYD_LANG_NL 0
+#if CYD_LANG_NL
+const char* TXT_OFFLINE   = "GEEN VERBINDING";
+const char* TXT_NOANSWER  = "Geen antwoord van ";
+const char* TXT_CHECKAPI  = "Draait de API op je pc? Klopt dit adres?";
+const char* TXT_HOLDSETUP = "Bovenbalk 2 sec vasthouden = instellen";
+#else
+const char* TXT_OFFLINE   = "NO CONNECTION";
+const char* TXT_NOANSWER  = "No answer from ";
+const char* TXT_CHECKAPI  = "Is the API running on your PC? Is this address right?";
+const char* TXT_HOLDSETUP = "Hold the top bar 2s to set up";
+#endif
 String   fingerprint = "";
 String   attKey = "";
 String   toast = "";
@@ -232,9 +256,10 @@ uint16_t stateColor(const String& s) {
 }
 
 String stateLabel(const String& s) {
-  if (s == "attention") return "WACHT OP JOU";
-  if (s == "active")    return "ACTIEF";
-  return "KLAAR";
+  // Uit de kopregel van /cyd.txt, dus in de taal van de pc.
+  if (s == "attention") return uiState[0];
+  if (s == "active")    return uiState[1];
+  return uiState[2];
 }
 
 void say(const String& msg) {          // kort berichtje in de kopregel
@@ -251,12 +276,10 @@ void drawHeader() {
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(alarm ? COL_BG : COL_TXT, bg);
 
-  char left[48];
-  if (!online)       snprintf(left, sizeof(left), "GEEN VERBINDING");
-  else if (alarm)    snprintf(left, sizeof(left), "%d WACHT%s OP JOU", nAtt, nAtt == 1 ? "" : "EN");
-  else if (nAct > 0) snprintf(left, sizeof(left), "%d ACTIEF", nAct);
-  else               snprintf(left, sizeof(left), "CLAUDE RUSTIG");
-  tft.drawString(left, 10, 5);
+  /* Offline moet het schermpje het zelf zeggen; online levert de pc de hele
+     zin al samengesteld aan, want alleen daar is bekend of het "1 needs you"
+     of "2 need you" moet zijn -- en in welke taal. */
+  tft.drawString(online ? uiHeader : String(TXT_OFFLINE), 10, 5);
 
   tft.setTextDatum(TR_DATUM);
   String right = (millis() < toastUntil) ? toast : clockTxt;
@@ -315,20 +338,20 @@ void drawRow(int i) {
     row.setTextFont(2);
     row.setTextColor(COL_MUTED, COL_BG);
     if (online) {
-      row.drawString("Geen actieve sessies.", 16, 10);
+      row.drawString(uiEmpty, 16, 10);
     } else {
       /* Zet er het adres bij dat hij probeert. Een typefout in het pc-adres is
          anders onvindbaar: wifi werkt, dus het portaal komt niet vanzelf, en het
          scherm zei alleen "Wacht op de pc..." zonder te verklappen waarop. */
       row.setTextColor(COL_ORANGE, COL_BG);
-      row.drawString(String("Geen antwoord van ") + cfgHost + ":" + cfgPort, 16, 3);
+      row.drawString(String(TXT_NOANSWER) + cfgHost + ":" + cfgPort, 16, 3);
       row.setTextColor(COL_MUTED, COL_BG);
-      row.drawString("Draait de API op je pc? Klopt dit adres?", 16, 21);
+      row.drawString(TXT_CHECKAPI, 16, 21);
     }
   } else if (i == 1 && !online && !nRows) {
     row.setTextFont(2);
     row.setTextColor(COL_MUTED, COL_BG);
-    row.drawString("Bovenbalk 2 sec vasthouden = instellen", 16, 10);
+    row.drawString(TXT_HOLDSETUP, 16, 10);
   }
 
   row.pushSprite(0, y);
@@ -440,6 +463,18 @@ void sendAction(const char* btn) {
 }
 
 // ---- data ophalen ----------------------------------------------------------
+// Een lijst gescheiden door ';' uit elkaar halen -- knoplabels en statuslabels
+// komen zo binnen in de kopregel van /cyd.txt.
+void splitList(const String& in, String* uit, int n) {
+  int p = 0;
+  for (int i = 0; i < n; i++) {
+    int sc = in.indexOf(';', p);
+    uit[i] = (sc < 0) ? in.substring(p) : in.substring(p, sc);
+    if (sc < 0) { for (int j = i + 1; j < n; j++) uit[j] = ""; return; }
+    p = sc + 1;
+  }
+}
+
 void splitFields(const String& line, int from, String* f, int n) {
   int p = from;
   for (int i = 0; i < n; i++) {
@@ -469,18 +504,20 @@ bool poll() {
     if (!line.length()) continue;
 
     if (line.charAt(0) == '#') {
-      String f[5];
-      splitFields(line, 1, f, 5);
+      /* #<att>|<act>|<done>|<HH:mm>|<knoplabels ;>|<kopregeltekst>|<statuslabels ;>
+         De laatste twee velden zijn later toegevoegd; een oudere API stuurt ze
+         niet en dan houden we gewoon de terugval aan. */
+      String f[7];
+      splitFields(line, 1, f, 7);
       att = f[0].toInt(); act = f[1].toInt(); done = f[2].toInt();
       if (f[3].length()) clk = f[3];
-      if (f[4].length()) {           // knoplabels, gescheiden door ;
-        int p = 0;
-        for (int i = 0; i < 3; i++) {
-          int sc = f[4].indexOf(';', p);
-          labels[i] = (sc < 0) ? f[4].substring(p) : f[4].substring(p, sc);
-          if (sc < 0) break;
-          p = sc + 1;
-        }
+      if (f[4].length()) splitList(f[4], labels, 3);      // knoplabels
+      if (f[5].length()) uiHeader = f[5];                 // "3 ACTIEF" / "2 NEED YOU"
+      if (f[6].length()) {
+        String s[4];
+        splitList(f[6], s, 4);
+        for (int i = 0; i < 3; i++) if (s[i].length()) uiState[i] = s[i];
+        if (s[3].length()) uiEmpty = s[3];
       }
       continue;
     }

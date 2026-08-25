@@ -100,16 +100,17 @@ You need Windows with PowerShell 5.1 (present by default) and Claude Code.
 
 ### Option A — the installer
 
-Build the package:
+Download `ClaudeDeck.zip` from the
+[latest release](https://github.com/dimitrihilverda/claude-sessions-monitor/releases/latest),
+or build it yourself:
 
 ```
 python build-pakket.py
 ```
 
-That produces `ClaudeDeck.zip` containing only what is needed to run. Unpack it
-and double-click `Install.cmd`. The installer copies the files, wires up the
-Claude Code hooks (backing up your `settings.json` first), creates Start menu
-shortcuts, optionally adds them to startup, and launches the HUD. See
+Unpack it and double-click `Install.cmd`. The installer copies the files, wires
+up the Claude Code hooks (backing up your `settings.json` first), creates Start
+menu shortcuts, optionally adds them to startup, and launches the HUD. See
 [installer/README-installer.md](installer/README-installer.md).
 
 ### Option B — straight from this folder
@@ -233,7 +234,7 @@ wscript.exe hud.vbs
 | `cyd/` | Arduino sketch, TFT settings, flashing and wiring instructions |
 | `case/` | printable enclosure: STLs, parametric generator, build notes |
 | `installer/` | installable package for other machines |
-| `build-pakket.py` | builds `ClaudeDeck.zip` |
+| `build-pakket.py` | builds `ClaudeDeck.zip`, the release package |
 | `web/` | the browser flasher, published to GitHub Pages by CI |
 | `diagnose.ps1` | checks hooks, files and processes when something is off |
 | `README-sessions.md` | the full manual |

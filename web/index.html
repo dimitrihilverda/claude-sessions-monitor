@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flash the Cheap Yellow Display &middot; Claude Sessions Monitor</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232A3238'/><rect x='6' y='9' width='20' height='14' rx='2' fill='%2391C847'/></svg>">
+<style>
+  :root {
+    --bg: #2A3238; --row: #2E3840; --line: #3A444B;
+    --txt: #EEF3F5; --muted: #8E9C8B; --leaf: #91C847; --amber: #E6A745;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 64px;
+    background: var(--bg); color: var(--txt);
+    font: 16px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 40px 0 10px; }
+  p.lead { color: var(--muted); margin: 0 0 32px; }
+  a { color: var(--leaf); }
+
+  .card {
+    background: var(--row); border: 1px solid var(--line);
+    border-radius: 12px; padding: 24px; margin: 0 0 28px;
+  }
+  .flash { text-align: center; }
+  .flash p { margin: 0 0 18px; color: var(--muted); font-size: 15px; }
+
+  esp-web-install-button { --esp-tools-button-color: #1F262F; }
+  esp-web-install-button[install-unsupported] { display: none; }
+  .unsupported {
+    display: none; background: rgba(230,167,69,.12);
+    border: 1px solid var(--amber); border-radius: 10px;
+    padding: 14px 16px; color: var(--txt); font-size: 15px; text-align: left;
+  }
+  html.no-webserial .unsupported { display: block; }
+  html.no-webserial .flash .ready { display: none; }
+
+  ol, ul { padding-left: 22px; }
+  li { margin: 7px 0; }
+  code {
+    background: #232B31; border: 1px solid var(--line); border-radius: 4px;
+    padding: 1px 6px; font-size: 14px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 15px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+  .note { color: var(--muted); font-size: 14px; }
+  footer { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+  .build { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+
+  <h1>Flash the Cheap Yellow Display</h1>
+  <p class="lead">
+    Puts <a href="https://github.com/dimitrihilverda/claude-sessions-monitor">Claude&nbsp;Sessions&nbsp;Monitor</a>
+    firmware on an ESP32-2432S028R, straight from this page. No Arduino IDE, no toolchain.
+  </p>
+
+  <div class="card flash">
+    <div class="ready">
+      <p>Plug the display into USB, then press the button and pick its serial port.</p>
+      <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
+    </div>
+    <div class="unsupported">
+      <strong>This browser cannot flash.</strong> Flashing needs Web Serial, which
+      today means desktop <strong>Chrome</strong> or <strong>Edge</strong>. Firefox,
+      Safari and mobile browsers do not support it. The page is safe to read in any
+      browser &mdash; only the button needs Chrome or Edge.
+    </div>
+  </div>
+
+  <h2>Before you press it</h2>
+  <ul>
+    <li><strong>A USB data cable.</strong> Plenty of cables only carry power. If the
+      port never appears, that is the first thing to swap.</li>
+    <li><strong>The CH340 driver.</strong> Most systems have it; Windows sometimes
+      does not. If no serial port shows up, install it from
+      <a href="https://www.wch-ic.com/downloads/CH341SER_EXE.html">WCH</a>.</li>
+    <li><strong>Close the Arduino IDE</strong> and any serial monitor. Only one
+      program can hold the port.</li>
+  </ul>
+
+  <h2>What happens after flashing</h2>
+  <p>
+    You do <strong>not</strong> enter your Wi-Fi password here, and it is not baked
+    into the firmware. On first boot the display brings up its own network:
+  </p>
+  <table>
+    <tr><th>Network</th><td><code>Claude-Deck</code></td></tr>
+    <tr><th>Password</th><td><code>claudedeck</code></td></tr>
+    <tr><th>Then open</th><td><code>http://192.168.4.1</code></td></tr>
+  </table>
+  <p>
+    Join it with your phone &mdash; on most phones the page opens by itself. Pick
+    your network, type the password, and fill in the address of the PC running the
+    web service. Settings are stored in NVS, so they survive reflashing: after the
+    first time you never have to do this again.
+  </p>
+  <p class="note">
+    To change them later, hold your finger on the top bar of the display for two
+    seconds. That is the way back in when the display is on Wi-Fi but the PC address
+    has gone stale &mdash; in that case the portal never appears on its own.
+  </p>
+
+  <h2>It flashed, and the screen is white</h2>
+  <p>
+    Then the panel is fine but its settings are not. This build ships the right
+    <code>User_Setup.h</code>, so a white screen after flashing from this page points
+    at a different board revision. The
+    <a href="https://github.com/dimitrihilverda/claude-sessions-monitor/blob/main/cyd/README-cyd.md#3-when-something-is-wrong">troubleshooting
+    table</a> walks through white screens, inverted colours and mirrored displays.
+  </p>
+
+  <h2>You still need the PC side</h2>
+  <p>
+    The display has nothing to show on its own: it asks a small web service on your
+    PC every three seconds. That service, the floating HUD and the Claude Code hooks
+    live in the repository &mdash; start with the
+    <a href="https://github.com/dimitrihilverda/claude-sessions-monitor#quick-start">quick
+    start</a>.
+  </p>
+
+  <footer>
+    <p>
+      Built from <code>cyd/claude_hud_cyd/claude_hud_cyd.ino</code> on every push to
+      <code>main</code>, so this page always carries the current firmware.
+    </p>
+    <p class="build">Build: <span id="build">loading&hellip;</span></p>
+    <p>MIT licensed &middot;
+      <a href="https://github.com/dimitrihilverda/claude-sessions-monitor">source on GitHub</a>
+    </p>
+  </footer>
+
+</main>
+
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+<script>
+  // Web Serial is Chrome/Edge only. Say so up front instead of showing a button
+  // that silently does nothing.
+  if (!('serial' in navigator)) {
+    document.documentElement.classList.add('no-webserial');
+  }
+
+  // Show which build this is, straight from the manifest the workflow wrote.
+  fetch('manifest.json', { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (m) {
+      document.getElementById('build').textContent = m.version || 'unknown';
+    })
+    .catch(function () {
+      document.getElementById('build').textContent = 'unavailable';
+    });
+</script>
+</body>
+</html>

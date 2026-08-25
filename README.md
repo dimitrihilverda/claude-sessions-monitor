@@ -139,6 +139,15 @@ on the back, sold for around £10. It polls your PC every three seconds and show
 one row per session. Tapping a row brings that terminal window to the front on
 your PC — the same thing clicking in the HUD does.
 
+### Flash it from your browser
+
+**[dimitrihilverda.github.io/claude-sessions-monitor](https://dimitrihilverda.github.io/claude-sessions-monitor/)**
+flashes the display over USB with no toolchain at all. That page is rebuilt from
+this repository on every push, so it always carries the current firmware. Needs
+desktop Chrome or Edge, because flashing uses Web Serial.
+
+### Or with the Arduino IDE
+
 Full build instructions are in **[cyd/README-cyd.md](cyd/README-cyd.md)**. The
 short version:
 
@@ -225,6 +234,7 @@ wscript.exe hud.vbs
 | `case/` | printable enclosure: STLs, parametric generator, build notes |
 | `installer/` | installable package for other machines |
 | `build-pakket.py` | builds `ClaudeDeck.zip` |
+| `web/` | the browser flasher, published to GitHub Pages by CI |
 | `diagnose.ps1` | checks hooks, files and processes when something is off |
 | `README-sessions.md` | the full manual |
 

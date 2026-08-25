@@ -1,0 +1,115 @@
+name: Build firmware and publish the web flasher
+
+# Every push to main rebuilds the sketch and republishes the GitHub Pages site,
+# so the flasher on that page always carries the current firmware rather than a
+# binary somebody remembered to commit.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cyd/**'
+      - 'web/**'
+      - '.github/workflows/firmware.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; the newest push wins.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install arduino-cli
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install the ESP32 core and libraries
+        run: |
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli lib install "TFT_eSPI" "XPT2046_Touchscreen"
+
+      - name: Apply the CYD display settings
+        # TFT_eSPI reads its pin configuration from User_Setup.h inside the
+        # library itself, so the repo's version has to be copied over it. Without
+        # this the build succeeds and the display stays white.
+        run: |
+          setup_dir="$(arduino-cli config get directories.user)/libraries/TFT_eSPI"
+          cp cyd/User_Setup_CYD.h "$setup_dir/User_Setup.h"
+          grep -q 'TFT_INVERSION_ON' "$setup_dir/User_Setup.h"
+
+      - name: Compile
+        run: |
+          mkdir -p build
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32 \
+            --output-dir build \
+            --warnings all \
+            cyd/claude_hud_cyd
+
+      - name: Assemble the site
+        # Four parts rather than the 4 MB merged image: together they are about
+        # 1.2 MB, so anyone flashing downloads a fraction of the data. The offsets
+        # are the standard ESP32 layout for the default partition scheme.
+        run: |
+          # Ask arduino-cli where its data lives rather than guessing a path;
+          # that differs between platforms and between arduino-cli versions.
+          data_dir="$(arduino-cli config get directories.data)"
+          core_dir="$(ls -d "$data_dir/packages/esp32/hardware/esp32/"* | head -1)"
+          echo "core: $core_dir"
+          test -f "$core_dir/tools/partitions/boot_app0.bin"
+
+          mkdir -p _site/firmware
+          cp web/index.html _site/
+          cp build/claude_hud_cyd.ino.bootloader.bin _site/firmware/bootloader.bin
+          cp build/claude_hud_cyd.ino.partitions.bin _site/firmware/partitions.bin
+          cp "$core_dir/tools/partitions/boot_app0.bin" _site/firmware/boot_app0.bin
+          cp build/claude_hud_cyd.ino.bin            _site/firmware/app.bin
+
+          version="$(date -u +%Y-%m-%d) ${GITHUB_SHA:0:7}"
+          cat > _site/manifest.json <<EOF
+          {
+            "name": "Claude Sessions Monitor (Cheap Yellow Display)",
+            "version": "$version",
+            "new_install_prompt_erase": true,
+            "builds": [
+              {
+                "chipFamily": "ESP32",
+                "parts": [
+                  { "path": "firmware/bootloader.bin", "offset": 4096 },
+                  { "path": "firmware/partitions.bin", "offset": 32768 },
+                  { "path": "firmware/boot_app0.bin",  "offset": 57344 },
+                  { "path": "firmware/app.bin",        "offset": 65536 }
+                ]
+              }
+            ]
+          }
+          EOF
+
+          echo "--- site ---"
+          find _site -type f -printf '%10s  %p\n'
+
+      - name: Check the manifest is valid JSON
+        run: python3 -c "import json;json.load(open('_site/manifest.json'));print('manifest ok')"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

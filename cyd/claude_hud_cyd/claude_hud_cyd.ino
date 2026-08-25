@@ -981,8 +981,18 @@ void bewaakWifi() {
 }
 
 // ---- cracktro --------------------------------------------------------------
-/* A nod to the intros of 1992. Open it: hold the BOOT button for two seconds.
-   Back: touch the screen or press any button.
+/* A nod to the intros of 1992. Back out: touch the screen or press any button.
+
+   Starting it: the HUD's right-click menu, or GET /demo on the PC. The command
+   rides along in the header line of /cyd.txt, so that route needs the display to
+   have a connection.
+
+   Holding GPIO0 for two seconds also works -- but only on boards where the
+   on-board button really is BOOT. On several CYD revisions that single button
+   next to the screen is wired to RST instead, and then pressing it simply
+   reboots: you end up in the setup portal whenever Wi-Fi fails to come up
+   within the 20 s window in setup(). If that is what your board does, use the
+   menu or /demo.
 
    >>> YOUR OWN TEXT HERE <<<  Leave the trailing spaces, then it wraps around
    neatly instead of colliding with itself. */

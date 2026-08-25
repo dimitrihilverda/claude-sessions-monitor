@@ -91,7 +91,8 @@ wins. Be aware that whatever you put there ends up in your git history.
 | Colours swapped (blue where red should be) | *That* one is the driver: swap `ILI9341_2_DRIVER` for `ILI9341_DRIVER`. Never mix power or gamma values from a different driver into an existing init sequence — `0xC0`/`0xC1`/`0xC5`/`0xC7` belong together, and taking half of them upsets the panel |
 | Mirrored or portrait | Change `tft.setRotation(1)` to 3 (or 0/2) |
 | "No connection" | The web service is not running (start "Claude Deck API" or `api.vbs`), the firewall is blocking it, or the PC address is stale — fix the last one by holding the top bar for two seconds and opening the portal |
-| Slow or dropped polls | The API rebuilds the session list through WMI process queries, which is slow. It caches for 1.5 s by default (`-CacheMs`); with caching off, requests take 1.4 s and sometimes over 4 s, which exceeds the display's timeout |
+| Slow or dropped polls | The API reads `sessions.json`, which the HUD writes every 3 s, so a request costs a few ms. If the HUD is not running it falls back to rebuilding from WMI process queries, which takes 1.2-1.5 s and can exceed the display's timeout — so start the HUD, or accept the slower path |
+| "No connection" while the API is clearly reachable from the PC | Testing from the PC itself proves nothing: traffic to your own address bypasses Windows Firewall. Start the service with `-LogRequests` and watch `actions.log`; if no request ever arrives from the display's address, the packets are not reaching the PC. Check whether the display is on a **guest or isolated Wi-Fi network** — those allow internet but block traffic between devices, and the ESP32 can only use 2.4 GHz, so it may end up on a different SSID than your PC |
 | It no longer joins your Wi-Fi (new password or network) | It brings up the `Claude-Deck` network by itself; join it with your phone and set it up again. No USB needed |
 | No beep | The CYD has no speaker on board, only the pads. Solder one to the speaker pads (IO26) or set `BEEP_ENABLED` to false |
 | Taps land next to where you press | Set `TOUCH_DEBUG` to 1, tap the four corners, read the raw values in the serial monitor and fill in `TS_MINX/MAXX/MINY/MAXY`. If everything is mirrored, flip `TOUCH_FLIP_X` / `TOUCH_FLIP_Y` |
@@ -112,10 +113,15 @@ wins. Be aware that whatever you put there ends up in your git history.
 `state|name|since|why|session-id`, preceded by a header line:
 
 ```
-#<needs-you>|<working>|<done>|<HH:mm>|<button labels ;>|<header text>|<state labels ;>
+#<needs-you>|<working>|<done>|<HH:mm>|<button labels ;>|<header text>|<state labels ;>|<command>
 ```
 
-The last two fields carry the display's text, which is why the screen follows the
+The last field is a one-shot command for the display, currently only `cracktro`.
+It stays on offer for a few seconds rather than being cleared by the first reader,
+because otherwise a browser on the status page swallows it before the display
+ever polls.
+
+Fields 6 and 7 carry the display's text, which is why the screen follows the
 language of your PC without a table of its own and without reflashing. The header
 text arrives already composed, because only the PC knows whether it should read
 "1 needs you" or "2 need you".
@@ -126,8 +132,17 @@ JSON library and parsing stays a handful of `indexOf` calls.
 
 ## An easter egg
 
-Hold the BOOT button for two seconds. Touch the screen or press any button to
-return. There is a chiptune on IO26 as well, which stays silent until you solder
+Start it from the HUD's right-click menu ("Cracktro on the display"), or with
+`GET http://<your-pc-ip>:8787/demo`. The command rides along in the header line
+of `/cyd.txt`, so the display has to be connected for either route.
+
+Holding the on-board button for two seconds works as well -- but only if that
+button really is BOOT (GPIO0). On several CYD revisions the single button next
+to the screen is wired to **RST**, and then pressing it just reboots the board.
+You will land in the setup portal whenever Wi-Fi does not come up within the
+20-second window at startup, which looks like the button "opening the settings".
+
+Touch the screen or press any button to return. There is a chiptune on IO26 as well, which stays silent until you solder
 a speaker to the pads. The scroller text is a clearly marked constant at the top
 of the sketch — write your own.
 

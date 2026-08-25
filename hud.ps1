@@ -448,6 +448,24 @@ $miAdres.Add_Click({
 })
 [void]$menu.Items.Add($miAdres)
 
+<#
+  Start the cracktro on the display from here. The command travels in the header
+  line of /cyd.txt, which the display picks up on its next poll -- so this only
+  does anything while the display actually has a connection. The board's own
+  button is the offline route.
+#>
+$miCracktro = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.cracktro')
+$miCracktro.Add_Click({
+    $ip = Get-LanIp
+    if (-not $ip) { return }
+    try {
+        Invoke-WebRequest -Uri "http://$($ip):$ApiPort/demo" -TimeoutSec 4 -UseBasicParsing | Out-Null
+    } catch {
+        try { $tray.ShowBalloonTip(3000, (T 'menu.cracktro'), (T 'err.noWindow'), 'Info') } catch { }
+    }
+})
+[void]$menu.Items.Add($miCracktro)
+
 $miStatus = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.statusPage')
 $miStatus.Add_Click({
     $ip = Get-LanIp

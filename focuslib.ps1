@@ -1,17 +1,17 @@
 ﻿# =============================================================================
-#  focuslib.ps1 -- welk venster hoort bij welke Claude-sessie, en hoe haal je
-#  het naar voren. Gedeeld door hud.ps1 (klikken) en session-api.ps1 (tikken
-#  op de CYD en de knopacties).
+#  focuslib.ps1 -- which window belongs to which Claude session, and how to
+#  bring it to the front. Shared by hud.ps1 (clicking) and session-api.ps1
+#  (tapping the display, and the button actions).
 #
 #  Dot-source:  . (Join-Path $PSScriptRoot 'focuslib.ps1')
 # =============================================================================
 
 Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
 
-# Alleen de ouderketen aflopen is niet genoeg: bij "attach project" hebben twee
-# projecten hetzelfde proces, en MainWindowHandle geeft dan willekeurig een van
-# de twee vensters. Daarom kijken we naar alle zichtbare vensters en scoren we
-# ze op ouderketen EN op de projectnaam in de venstertitel.
+# Walking the parent chain alone is not enough: with "attach project" two
+# projects share one process, and MainWindowHandle then returns an arbitrary
+# one of the two windows. So we look at every visible window and score it on
+# the parent chain AND on the project name in the window title.
 if (-not ('Dash.Win' -as [type])) {
 Add-Type -TypeDefinition @'
 using System;
@@ -65,17 +65,17 @@ namespace Dash {
 '@
 }
 
-# Processen die een sessievenster kunnen huisvesten. Staat jouw editor of
-# terminal er niet bij? Zet hem erbij -- het is alleen een bonuspunt.
+# Processes that can host a session window. Your editor or terminal not in the
+# list? Add it -- it is only worth a bonus point.
 $DashHostProcs = @(
     'phpstorm64','phpstorm','idea64','idea','webstorm64','pycharm64','rider64',
     'windowsterminal','openconsole','conhost','cmd','powershell','pwsh',
     'code','wt','alacritty','wezterm-gui','mintty'
 )
 
-# Ouderketen van het Claude-proces, met controle op starttijd: is de echte
-# ouder al afgesloten, dan wijst ParentProcessId naar een hergebruikte PID en
-# zou je bij een willekeurig ander venster uitkomen.
+# Parent chain of the Claude process, with a start-time check: if the real
+# parent has already exited, ParentProcessId points at a reused PID and you
+# would end up at some unrelated window.
 function Get-DashProcChain([int]$startPid) {
     $chain = @()
     $id = $startPid
@@ -92,7 +92,7 @@ function Get-DashProcChain([int]$startPid) {
     return $chain
 }
 
-# Alle vensters met een score > 0, hoogste eerst.
+# Every window with a score > 0, highest first.
 function Get-DashWindowCandidates {
     param([string]$Cwd, [int]$OwnerPid = 0, [int]$HostPid = 0)
 
@@ -101,8 +101,8 @@ function Get-DashWindowCandidates {
     $cwdLow  = ([string]$Cwd).ToLower()
     $leafLow = ([string]$leaf).ToLower()
 
-    # De ouderketen begint bij het Claude-proces; kennen we dat niet, dan bij
-    # het venster dat de beacon heeft vastgelegd.
+    # The parent chain starts at the Claude process; if we do not know it, start
+    # at the window the beacon recorded.
     $chain = @()
     if     ($OwnerPid -gt 0) { $chain = Get-DashProcChain $OwnerPid }
     elseif ($HostPid  -gt 0) { $chain = Get-DashProcChain $HostPid }
@@ -115,11 +115,11 @@ function Get-DashWindowCandidates {
             $t = $w.Title.ToLower()
 
             $score = 0
-            if ($HostPid -gt 0 -and $w.Pid -eq $HostPid) { $score += 120 }  # het venster uit de beacon
-            if ($chain -contains $w.Pid)                 { $score += 100 }  # hoort bij deze sessie
-            if     ($cwdLow  -and $t.Contains($cwdLow))  { $score += 45  }  # volledig pad in de titel
-            elseif ($leafLow -and $t.Contains($leafLow)) { $score += 30  }  # projectnaam in de titel
-            if ($DashHostProcs -contains $pn)            { $score += 10  }  # ziet eruit als IDE of terminal
+            if ($HostPid -gt 0 -and $w.Pid -eq $HostPid) { $score += 120 }  # the window from the beacon
+            if ($chain -contains $w.Pid)                 { $score += 100 }  # belongs to this session
+            if     ($cwdLow  -and $t.Contains($cwdLow))  { $score += 45  }  # full path in the title
+            elseif ($leafLow -and $t.Contains($leafLow)) { $score += 30  }  # project name in the title
+            if ($DashHostProcs -contains $pn)            { $score += 10  }  # looks like an IDE or terminal
             if ($score -le 0) { continue }
 
             $out += [pscustomobject]@{
@@ -151,8 +151,8 @@ function Show-DashWindow {
     } catch { return $false }
 }
 
-# Haalt het venster van een sessie naar voren. Geeft het gekozen venster terug,
-# of $null als er niets bij paste.
+# Brings a session's window to the front. Returns the chosen window, or $null
+# if nothing matched.
 function Invoke-DashSessionFocus {
     param($Session, [switch]$FolderFallback)
 
@@ -172,9 +172,9 @@ function Invoke-DashSessionFocus {
     return $null
 }
 
-# Toetsaanslagen naar het venster van een sessie sturen (SendKeys-notatie:
-# {ENTER}, {ESC}, ^c, ...). Stuurt alleen als dat venster ook echt op de
-# voorgrond staat -- anders zou je in een willekeurig ander venster typen.
+# Send keystrokes to a session's window (SendKeys notation: {ENTER}, {ESC},
+# ^c, ...). Only sends if that window really is in the foreground -- otherwise
+# you would be typing into some other window.
 function Send-DashKeys {
     param(
         [Parameter(Mandatory = $true)]$Handle,

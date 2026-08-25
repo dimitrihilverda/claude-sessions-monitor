@@ -1,16 +1,18 @@
-﻿# install-hooks.ps1 — zet de dashboard-beacon-hooks in je globale Claude Code-settings
-# Eenmalig draaien. Idempotent: nogmaals draaien voegt niets dubbel toe.
-# Maakt eerst een backup van een bestaande settings.json.
+﻿# install-hooks.ps1 -- register the beacon hooks in your global Claude Code settings
+# Run once. Idempotent: running it again adds nothing twice.
+# Backs up an existing settings.json first.
 $ErrorActionPreference = 'Stop'
 
 $settingsDir  = Join-Path $env:USERPROFILE '.claude'
 $settingsPath = Join-Path $settingsDir 'settings.json'
 $beacon = Join-Path $PSScriptRoot 'beacon.ps1'
-if (-not (Test-Path $beacon)) { throw "beacon.ps1 niet gevonden naast dit script ($beacon)" }
+if (-not (Test-Path $beacon)) { throw "beacon.ps1 not found next to this script ($beacon)" }
 $cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$beacon`""
-# PostToolUse vuurt bij elke tool-aanroep en is wat een sessie uit de
-# "aandacht nodig"-stand haalt zodra je een permissievraag hebt goedgekeurd.
-# beacon.ps1 stapt daar in de meeste gevallen meteen weer uit.
+# PostToolUse fires on every tool call and is what takes a session out of the
+# "needs you" state once you have approved a permission request. Without it a
+# session stays orange until it fully finishes, because Claude Code fires
+# nothing at all between Notification and Stop. beacon.ps1 returns immediately
+# in most cases, so the cost per tool call is negligible.
 $events = 'SessionStart','UserPromptSubmit','PostToolUse','Notification','Stop','SessionEnd'
 
 New-Item -ItemType Directory -Force -Path $settingsDir | Out-Null
@@ -19,7 +21,7 @@ $settings = $null
 if (Test-Path $settingsPath) {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     Copy-Item $settingsPath "$settingsPath.bak-$stamp"
-    Write-Host "Backup gemaakt: settings.json.bak-$stamp"
+    Write-Host "Backup written: settings.json.bak-$stamp"
     $raw = Get-Content $settingsPath -Raw
     if ($raw.Trim()) { $settings = $raw | ConvertFrom-Json }
 }
@@ -35,7 +37,7 @@ foreach ($ev in $events) {
     $prop = $settings.hooks.PSObject.Properties[$ev]
     if ($null -eq $prop) {
         $settings.hooks | Add-Member -NotePropertyName $ev -NotePropertyValue @($entry)
-        Write-Host "Toegevoegd: $ev"
+        Write-Host "Added:        $ev"
     } else {
         $already = $false
         foreach ($e in @($prop.Value)) {
@@ -44,15 +46,15 @@ foreach ($ev in $events) {
             }
         }
         if ($already) {
-            Write-Host "Stond er al:  $ev"
+            Write-Host "Already set:  $ev"
         } else {
             $prop.Value = @($prop.Value) + @($entry)
-            Write-Host "Toegevoegd: $ev"
+            Write-Host "Added:        $ev"
         }
     }
 }
 
 $settings | ConvertTo-Json -Depth 16 | Set-Content -Path $settingsPath -Encoding UTF8
 Write-Host ""
-Write-Host "Klaar! Hooks staan in $settingsPath"
-Write-Host "Nieuwe Claude Code-sessies melden zich vanaf nu op het dashboard."
+Write-Host "Done. Hooks are in $settingsPath"
+Write-Host "Claude Code sessions you start from now on will report in."

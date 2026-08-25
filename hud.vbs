@@ -1,4 +1,4 @@
-' Start de Claude-HUD zonder dat er een PowerShell-venster opflitst.
+' Start the Claude HUD without a PowerShell window flashing up.
 Set sh = CreateObject("WScript.Shell")
 here = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName)
 sh.CurrentDirectory = here

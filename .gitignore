@@ -1,5 +1,5 @@
-# Persoonlijke data en werkbestanden -- die horen niet in een repo, ook niet
-# in een private. Ze bevatten je agenda, je inbox en de prompts van je sessies.
+# Personal data and working files -- these do not belong in a repo, not even
+# a private one. They contain your calendar, your inbox and your session prompts.
 dashboard.html
 sessions.js
 sessions.json
@@ -7,8 +7,9 @@ session-status/
 snooze.json
 actions.log
 hud-config.json
+taak-prompt.txt
 
-# tijdelijke bestanden van het atomair wegschrijven
+# temporary files from the atomic write
 *.tmp
 
 # Windows / editors

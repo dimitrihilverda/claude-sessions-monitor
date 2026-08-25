@@ -54,8 +54,8 @@ the time and what Claude is doing.
 Two helper scripts for when a name is not what you expected:
 
 ```
-powershell -ExecutionPolicy Bypass -File check-titels.ps1
-powershell -ExecutionPolicy Bypass -File zoek-titel.ps1 -SessionId <id>
+powershell -ExecutionPolicy Bypass -File check-titles.ps1
+powershell -ExecutionPolicy Bypass -File find-title.ps1 -SessionId <id>
 ```
 
 The first shows which source is used per session. The second dumps the title

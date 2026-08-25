@@ -1,5 +1,5 @@
-# Geen regelovergangen omzetten: de PowerShell-scripts staan bewust in
-# UTF-8 met BOM en CRLF, en daar is PowerShell 5.1 gevoelig voor.
+# Do not convert line endings: the PowerShell scripts are deliberately in
+# UTF-8 with BOM and CRLF, which PowerShell 5.1 is sensitive about.
 * -text
 
 *.stl binary

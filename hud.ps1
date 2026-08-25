@@ -1,13 +1,13 @@
 ﻿# =============================================================================
-#  hud.ps1 -- klein always-on-top venster met je live Claude-sessies
+#  hud.ps1 -- a small always-on-top window with your live Claude sessions
 #
-#  Starten (zonder consolevenster):  wscript.exe hud.vbs
-#  Of om te testen:                  powershell -ExecutionPolicy Bypass -File hud.ps1
+#  Start (no console window):  wscript.exe hud.vbs
+#  Or to test:                 powershell -ExecutionPolicy Bypass -File hud.ps1
 #
-#  Slepen         : met de linkermuisknop ergens in het venster
-#  Klik op een rij: probeert de terminal van die sessie naar voren te halen
-#  Rechtermuis    : menu (vastzetten, compact, alleen aandacht, autostart, sluiten)
-#  Dubbelklik tray: HUD verbergen of terugtoveren
+#  Drag        : left mouse button anywhere in the window
+#  Click a row : tries to bring that session's terminal to the front
+#  Right-click : menu (pin, compact, attention only, autostart, quit)
+#  Double-click tray: hide or restore the HUD
 # =============================================================================
 $ErrorActionPreference = 'Continue'
 Add-Type -AssemblyName System.Windows.Forms
@@ -20,11 +20,11 @@ $StatusDir  = Join-Path $Root 'session-status'
 $ConfigPath = Join-Path $Root 'hud-config.json'
 $RefreshMs  = 3000
 
-# Ook sessions.json / sessions.js bijwerken, zodat de webpagina en de CYD
-# meeliften op de HUD-verversing (en dode sessies daar ook verdwijnen).
+# Also refresh sessions.json / sessions.js, so the web page and the display
+# ride along on the HUD's refresh (and dead sessions disappear there too).
 $WritePayload = $true
 
-# ---- kleuren (Moving-In) ----------------------------------------------------
+# ---- colours ----------------------------------------------------------------
 $C = @{
     Bg        = [System.Drawing.Color]::FromArgb(31, 38, 47)
     Row       = [System.Drawing.Color]::FromArgb(38, 46, 56)
@@ -45,7 +45,7 @@ $F = @{
     Small = New-Object System.Drawing.Font('Segoe UI', 7.5)
 }
 
-# ---- instellingen bewaren ---------------------------------------------------
+# ---- persisting settings ----------------------------------------------------
 $cfg = [ordered]@{
     x = -1; y = -1; compact = $false; onlyAttention = $false
     topmost = $true; opacity = 0.94
@@ -65,49 +65,49 @@ function Save-Cfg {
     } catch { }
 }
 
-# ---- venster naar voren halen ----------------------------------------------
-# De vensterzoeker zit in focuslib.ps1, zodat de HUD en de CYD-API dezelfde
-# logica gebruiken.
+# ---- bringing a window to the front -----------------------------------------
+# The window finder lives in focuslib.ps1, so the HUD and the display API share
+# the same logic.
 . (Join-Path $Root 'focuslib.ps1')
 . (Join-Path $Root 'langlib.ps1')
 
 function Show-SessionWindow($sess, [switch]$Explain) {
     $cwd = [string]$sess.cwd
 
-    # Shift ingedrukt? Dan wil je de map, niet het venster.
+    # Shift held down? Then you want the folder, not the window.
     if ([System.Windows.Forms.Control]::ModifierKeys -band [System.Windows.Forms.Keys]::Shift) {
         try { if ($cwd -and (Test-Path $cwd)) { Start-Process explorer.exe $cwd; return } } catch { }
     }
 
-    # Ctrl+klik: laat zien waarom de HUD dit venster kiest. Handig als hij het
-    # verkeerde projectvenster pakt -- dan zie je meteen welke titels er zijn.
+    # Ctrl+click: show why the HUD picks this window. Useful when it grabs the
+    # wrong project window -- you immediately see which titles exist.
     if ($Explain) {
         $cands = @(Get-DashWindowCandidates -Cwd $cwd -OwnerPid ([int]$sess.owner_pid))
         $chain = @()
         if ([int]$sess.owner_pid -gt 0) { $chain = Get-DashProcChain ([int]$sess.owner_pid) }
-        $txt = "Sessie: $($sess.name)`nMap: $cwd`nOuderketen (PID's): $($chain -join ', ')`n`nKandidaten:`n"
+        $txt = "Session: $($sess.name)`nFolder: $cwd`nParent chain (PIDs): $($chain -join ', ')`n`nCandidates:`n"
         foreach ($c in ($cands | Select-Object -First 8)) {
             $txt += "  {0,4}  {1} ({2})  {3}`n" -f $c.Score, $c.Proc, $c.Pid, $c.Title
         }
-        if (-not $cands.Count) { $txt += "  (geen enkel venster gaf een treffer)`n" }
+        if (-not $cands.Count) { $txt += "  (no window matched at all)`n" }
         $best = if ($cands.Count -and $cands[0].Score -ge 30) { $cands[0] } else { $null }
-        $txt += "`nGekozen: " + $(if ($best) { "$($best.Title)  [score $($best.Score)]" } else { 'niets -- opent de map' })
+        $txt += "`nChosen: " + $(if ($best) { "$($best.Title)  [score $($best.Score)]" } else { 'nothing -- opens the folder' })
         [void][System.Windows.Forms.MessageBox]::Show($txt, (T 'notify.pickWindow'), 'OK', 'Information')
         return
     }
 
-    # Geen verkenner meer als terugval: je klikte op een sessie, niet op een map.
-    # Lukt het niet, zeg dat dan gewoon -- shift+klik opent de map wel.
+    # No Explorer fallback: you clicked a session, not a folder. If it does not
+    # work, just say so -- shift+click opens the folder anyway.
     $w = Invoke-DashSessionFocus -Session $sess
     if (-not $w) {
         try {
             $tray.ShowBalloonTip(4000, (T 'notify.noWindow'),
-                "Voor '$($sess.name)' is geen venster te vinden. Shift+klik opent de map.", 'Info')
+                "No window found for '$($sess.name)'. Shift+click opens the folder.", 'Info')
         } catch { }
     }
 }
 
-# ---- het venster ------------------------------------------------------------
+# ---- the window -------------------------------------------------------------
 $form                 = New-Object System.Windows.Forms.Form
 $form.Text            = (T 'app.title')
 $form.FormBorderStyle = 'None'
@@ -144,30 +144,30 @@ function Set-Rounded {
     } catch { }
 }
 
-# ---- staat ------------------------------------------------------------------
+# ---- state ------------------------------------------------------------------
 $state = [ordered]@{
-    rows      = @()          # zichtbare sessies
+    rows      = @()          # visible sessions
     known     = 0
     hitboxes  = @()          # @{ Rect; Sess }
     hover     = -1
-    seen      = @{}          # session_id|updated -> al gemeld
+    seen      = @{}          # session_id|updated -> already announced
     lastOk    = $null
     dragging  = $false
     dragFrom  = $null
     formFrom  = $null
     fp        = ''
-    restart   = $false      # gezet door 'HUD herstarten' in het menu
-    fpUi      = ''          # hoe het venster er nu uitziet
-    lastCount = -1          # aantal rijen bij de vorige tekening
+    restart   = $false      # set by 'Restart HUD' in the menu
+    fpUi      = ''          # what the window currently looks like
+    lastCount = -1          # number of rows at the previous paint
     clock     = '--:--'
 }
 
 $HeadH = 30
 function Get-RowH { if ($cfg.compact) { return 30 } else { return 46 } }
 
-# Alleen de opgegeven rijen opnieuw laten tekenen. De tekenroutine loopt nog
-# steeds alle rijen langs -- dat moet ook, want daar worden de klikvlakken
-# opnieuw opgebouwd -- maar Windows knipt alles buiten deze rechthoeken weg.
+# Only repaint the given rows. The paint routine still walks every row -- it
+# has to, because that is where the click targets are rebuilt -- but Windows
+# clips away everything outside these rectangles.
 function Invalidate-Rijen($indexen) {
     $iets = $false
     foreach ($i in $indexen) {
@@ -187,7 +187,7 @@ function Update-Layout {
     Set-Rounded
 }
 
-# ---- tekenen ----------------------------------------------------------------
+# ---- painting ---------------------------------------------------------------
 function Draw-Chip($g, $x, $y, $text, $col) {
     $sz = $g.MeasureString($text, $F.Chip)
     $w  = [int]$sz.Width + 14
@@ -212,7 +212,7 @@ $form.Add_Paint({
 
     $W = $form.Width
 
-    # kop
+    # header
     $hb = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(24, 30, 38))
     $g.FillRectangle($hb, 0, 0, $W, $HeadH); $hb.Dispose()
 
@@ -235,7 +235,7 @@ $form.Add_Paint({
     $lp = New-Object System.Drawing.Pen $C.Line
     $g.DrawLine($lp, 0, $HeadH, $W, $HeadH); $lp.Dispose()
 
-    # rijen
+    # rows
     $state.hitboxes = @()
     $y  = $HeadH + 6
     $rh = Get-RowH
@@ -243,7 +243,7 @@ $form.Add_Paint({
     if (@($state.rows).Count -eq 0) {
         $eb = New-Object System.Drawing.SolidBrush $C.Muted
         if ($cfg.onlyAttention) {
-            # anders lijkt de HUD kapot terwijl er alleen een filter aan staat
+            # otherwise the HUD looks broken when it is only a filter being on
             $ob = New-Object System.Drawing.SolidBrush $C.Orange
             $g.DrawString((T 'empty.filtered'), $F.Why, $eb, 14, ($y + 6))
             $g.DrawString((T 'empty.filterHint'),
@@ -279,7 +279,7 @@ $form.Add_Paint({
         [void](Draw-Chip $g ($rect.Right - 8) ($rect.Y + 6) $r.label $col)
 
         if (-not $cfg.compact) {
-            # regel 1 is de titel van de sessie, regel 2 vertelt waar hij draait
+            # line 1 is the session title, line 2 says where it runs
             $why = [string]$r.why
             if (-not $why) { $why = $r.cwd }
             $waar = [string]$r.folder
@@ -300,7 +300,7 @@ $form.Add_Paint({
   } catch { }
 })
 
-# ---- verversen --------------------------------------------------------------
+# ---- refreshing -------------------------------------------------------------
 function Refresh-Now {
     try {
         $all = @(Get-DashSessions -Dir $StatusDir)
@@ -311,7 +311,7 @@ function Refresh-Now {
         $state.known = $all.Count
         $state.lastOk = Get-Date
 
-        # alleen naar schijf schrijven als er echt iets veranderd is
+        # only write to disk when something really changed
         if ($WritePayload) {
             $fp = (($vis | ForEach-Object { $_.session_id + $_.state + $_.updated }) -join ';')
             if ($fp -ne $state.fp) {
@@ -320,7 +320,7 @@ function Refresh-Now {
             }
         }
 
-        # nieuwe aandachtsvraag -> geluid + tray-ballon
+        # a new attention request -> sound + tray balloon
         foreach ($r in @($vis | Where-Object { $_.state -eq 'attention' })) {
             $key = $r.session_id + '|' + $r.updated
             if (-not $state.seen.ContainsKey($key)) {
@@ -336,8 +336,8 @@ function Refresh-Now {
     } catch {
         $state.lastOk = $null
     }
-    # Hertekenen is wat je als geknipper zag: doe het alleen als er echt iets
-    # verandert. Wisselt alleen de klok, dan is de kopregel genoeg.
+    # Repainting is what you saw as flicker: only do it when something really
+    # changes. If only the clock ticks, the header line is enough.
     $rows  = @($state.rows)
     $fpUi  = (($rows | ForEach-Object { $_.session_id + '|' + $_.state + '|' + $_.label + '|' + $_.name + '|' + $_.why + '|' + $_.since }) -join ';') + '#' + $state.known + '#' + $cfg.onlyAttention
     $clock = if ($state.lastOk) { $state.lastOk.ToString('HH:mm') } else { '--:--' }
@@ -415,15 +415,15 @@ $miDash = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.dashboard')
 $miDash.Add_Click({ try { Start-Process (Join-Path $Root 'dashboard.html') } catch { } })
 [void]$menu.Items.Add($miDash)
 
-# ---- adres voor het touchscreen ---------------------------------------------
+# ---- address for the touchscreen --------------------------------------------
 <#
-  Deze pc heeft meestal meer dan een IPv4-adres: VirtualBox, WSL en Docker zetten
-  er elk een neer. Voor de CYD is er maar een bruikbaar, namelijk dat van de
-  interface waar de default route over loopt. Daarop selecteren we, in plaats van
-  "alles wat geen loopback is" -- dan krijg je 172.19.x en 192.168.56.x er gratis
-  bij en zit je te gokken welke je op het schermpje moet invullen.
+  This PC usually has more than one IPv4 address: VirtualBox, WSL and Docker
+  each add one. Only one of them is usable for the display, namely the address
+  of the interface the default route runs over. We select on that, rather than
+  "anything that is not loopback" -- which throws in 172.19.x and 192.168.56.x
+  for free and leaves you guessing which one to type into the display.
 #>
-$ApiPort = 8787          # gelijk aan de standaard van session-api.ps1
+$ApiPort = 8787          # same as the default in session-api.ps1
 
 function Get-LanIp {
     try {
@@ -436,7 +436,7 @@ function Get-LanIp {
             if ($ip) { return $ip }
         }
     } catch { }
-    # geen default route (geen netwerk): dan liever niets beloven
+    # no default route (no network): better to promise nothing
     return $null
 }
 
@@ -478,9 +478,9 @@ $miStart.Add_Click({
 
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 
-# Herstarten start de nieuwe HUD pas nadat deze is afgesloten (zie onderaan het
-# script). Anders draaien er even twee tegelijk en schrijven ze allebei naar
-# hud-config.json en sessions.json.
+# Restarting only launches the new HUD after this one has closed (see the
+# bottom of the script). Otherwise two run at once and both write to
+# hud-config.json and sessions.json.
 $miRestart = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.restart')
 $miRestart.Add_Click({
     $state.restart = $true
@@ -494,16 +494,16 @@ $miQuit = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.quit')
 $miQuit.Add_Click({ Save-Cfg; $tray.Visible = $false; $form.Close() })
 [void]$menu.Items.Add($miQuit)
 
-# Het adres pas bepalen als je het menu opent, niet eenmalig bij het starten:
-# na een router-herstart of een wisseling van netwerk klopt een onthouden adres
-# niet meer, en juist dat verouderde adres is waar je op het schermpje op vastloopt.
+# Work out the address when you open the menu, not once at startup: after a
+# router restart or a change of network a remembered address is wrong, and it
+# is exactly that stale address that leaves you stuck at the display.
 $menu.Add_Opening({
     <#
-      dashboard.html is een eigen, persoonlijke pagina die niet met dit project
-      meegeleverd wordt (hij staat in .gitignore: er staat privedata in). Heeft
-      iemand hem niet, dan hoort er ook geen menu-item naar te wijzen. We kijken
-      bij het openen van het menu, niet eenmalig, zodat hij verschijnt zodra je
-      er alsnog een neerzet.
+      dashboard.html is a personal page that is not shipped with this project
+      (it is in .gitignore: it contains private data). If somebody does not
+      have it, no menu entry should point at it. We check when the menu opens
+      rather than once, so it appears the moment you do add one.
+
     #>
     $miDash.Visible = (Test-Path (Join-Path $Root 'dashboard.html'))
 
@@ -523,7 +523,7 @@ $form.ContextMenuStrip = $menu
 $tray.ContextMenuStrip = $menu
 $tray.Add_DoubleClick({ $form.Visible = -not $form.Visible })
 
-# ---- muis en toetsen --------------------------------------------------------
+# ---- mouse and keys ---------------------------------------------------------
 $form.Add_MouseDown({
     param($s, $e)
     if ($e.Button -eq 'Left') {
@@ -568,8 +568,8 @@ $form.Add_MouseMove({
         $oud = $state.hover
         $state.hover = $idx
         $form.Cursor = if ($idx -ge 0) { [System.Windows.Forms.Cursors]::Hand } else { [System.Windows.Forms.Cursors]::Default }
-        # Alleen de twee betrokken rijen opnieuw laten tekenen. Het hele venster
-        # ongeldig verklaren gaf bij elke muisbeweging een korte flikkering.
+        # Only repaint the two rows involved. Invalidating the whole window produced a
+        # brief flicker on every mouse move.
         Invalidate-Rijen @($oud, $idx)
     }
 })
@@ -590,8 +590,8 @@ $timer.Interval = $RefreshMs
 $timer.Add_Tick({ Refresh-Now })
 
 $form.Add_Shown({
-    # WS_EX_COMPOSITED laat Windows het hele venster in een buffer tekenen;
-    # samen met DoubleBuffered is dat het einde van het geflikker.
+    # WS_EX_COMPOSITED makes Windows draw the whole window into a buffer; together
+    # with DoubleBuffered that is the end of the flicker.
     try {
         $GWL_EXSTYLE      = -20
         $WS_EX_COMPOSITED = 0x02000000

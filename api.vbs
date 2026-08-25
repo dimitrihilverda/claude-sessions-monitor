@@ -1,4 +1,4 @@
-' Start de Claude sessie-API (voor de CYD) zonder consolevenster.
+' Start the Claude sessions API (for the display) without a console window.
 Set sh = CreateObject("WScript.Shell")
 here = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName)
 sh.CurrentDirectory = here

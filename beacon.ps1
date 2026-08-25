@@ -1,29 +1,29 @@
 ﻿# =============================================================================
-#  beacon.ps1 -- Claude sessie-beacon voor het dashboard, de HUD en de CYD
-#  Wordt aangeroepen door Claude Code hooks (zie claude-hooks-snippet.json).
-#  Leest de hook-JSON van stdin, schrijft session-status\<session_id>.json en
-#  bundelt alles in sessions.json + sessions.js.
+#  beacon.ps1 -- the Claude session beacon, feeding the HUD and the display.
+#  Called by the Claude Code hooks (see claude-hooks-snippet.json). Reads the
+#  hook JSON from stdin, writes session-status\<session_id>.json and merges
+#  everything into sessions.json + sessions.js.
 #
-#  v2: legt de PID van het Claude-proces vast, zodat sessies die zonder
-#      SessionEnd verdwijnen (terminal dichtgeslagen, crash, /clear) niet meer
-#      als "Actief" blijven hangen.
+#  v2: records the PID of the Claude process, so sessions that vanish without
+#      a SessionEnd (terminal closed with the X, a crash, /clear) no longer
+#      linger as "working".
 # =============================================================================
 $ErrorActionPreference = 'SilentlyContinue'
 
 . (Join-Path $PSScriptRoot 'sessionlib.ps1')
 
-# --- instellingen voor de Windows-meldingen --------------------------------
-# Notification = Claude vraagt permissie of wacht op invoer -> altijd melden.
-# Stop         = Claude is klaar. Alleen melden als de run langer dan
-#                $ToastStopMinSeconds duurde; bij korte antwoorden zit je zelf
-#                toch in de terminal. Dit is puur de toast: in het dashboard,
-#                de HUD en op de CYD is Stop een neutrale "Klaar"-status en
-#                nooit een oranje alarm.
+# --- Windows notification settings ------------------------------------------
+# Notification = Claude wants permission or input -> always notify.
+# Stop         = Claude has finished. Only notify if the run took longer than
+#                $ToastStopMinSeconds; for short answers you are sitting in the
+#                terminal anyway. This is purely about the toast: in the HUD
+#                and on the display, Stop is a neutral "done" state and never
+#                an orange alarm.
 $ToastEnabled        = $true
 $ToastStopMinSeconds = 60
 
 function Show-DashToast([string]$title, [string]$body) {
-    # 1e keus: echte Windows-toast (blijft in het meldingencentrum staan).
+    # First choice: a real Windows toast (stays in the notification centre).
     try {
         [void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
         [void][Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]
@@ -38,7 +38,7 @@ function Show-DashToast([string]$title, [string]$body) {
         return
     } catch { }
 
-    # 2e keus: BurntToast, als die module toevallig staat.
+    # Second choice: BurntToast, if that module happens to be installed.
     try {
         if (Get-Module -ListAvailable -Name BurntToast) {
             Import-Module BurntToast -ErrorAction Stop
@@ -47,7 +47,7 @@ function Show-DashToast([string]$title, [string]$body) {
         }
     } catch { }
 
-    # 3e keus: ballontip bij de klok.
+    # Third choice: a balloon tip near the clock.
     try {
         Add-Type -AssemblyName System.Windows.Forms
         Add-Type -AssemblyName System.Drawing
@@ -68,7 +68,7 @@ if (-not $j.session_id) { exit 0 }
 $dir = Join-Path $PSScriptRoot 'session-status'
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
-# --- vorige stand lezen ------------------------------------------------------
+# --- read the previous state -------------------------------------------------
 $file       = Join-Path $dir ($j.session_id + '.json')
 $prev       = $null
 $prevEvent  = ''
@@ -96,11 +96,11 @@ if (-not $prevState) { $prevState = Get-DashState $prevEvent }
 
 $ev = [string]$j.hook_event_name
 
-# --- snelle route voor de tool-hooks ----------------------------------------
-# PreToolUse/PostToolUse vuren bij elke tool-aanroep. Ze zijn er alleen om een
-# sessie uit de attention- of klaar-stand te halen zodra Claude weer werkt.
-# Staat de sessie al kort daarvoor op 'active', dan is er niets te melden en
-# zijn we meteen weg: geen procesboom aflopen, geen toast, niets herschrijven.
+# --- fast path for the tool hooks -------------------------------------------
+# PreToolUse/PostToolUse fire on every tool call. They exist only to take a
+# session out of the attention or done state once Claude is working again. If
+# the session was already 'active' moments ago there is nothing to report, so
+# we leave straight away: no process tree, no toast, nothing rewritten.
 $HeartbeatSeconds = 20
 if (($ev -eq 'PostToolUse' -or $ev -eq 'PreToolUse') -and
     $prevState -eq 'active' -and $prevAge -lt $HeartbeatSeconds) {
@@ -115,21 +115,21 @@ if ($j.prompt) {
 $msg = ''
 if ($j.message) { $msg = [string]$j.message }
 
-# Bij Stop/Notification/PostToolUse stuurt de hook geen prompt mee: de laatste
-# opdracht uit de vorige stand vasthouden, anders staat er "Klaar" zonder
-# waarover het ging.
+# On Stop/Notification/PostToolUse the hook sends no prompt, so hold on to the
+# last instruction from the previous state. Otherwise it reads "done" without
+# saying what it was about.
 if (-not $prompt -and $prevPrompt) { $prompt = $prevPrompt }
 
-# De procesboom aflopen kost een paar CIM-aanroepen; kennen we de PID van deze
-# sessie al, dan nemen we die over. Een sessie verhuist niet van proces.
+# Walking the process tree costs a few CIM calls; if we already know this
+# session's PID we reuse it. A session does not move between processes.
 if ($prevPid -gt 0) {
     $owner = [pscustomobject]@{ OwnerPid = $prevPid; Start = $prevStart }
 } else {
     $owner = Get-DashOwner
 }
 
-# De titel komt uit het transcript. Eenmaal gevonden bewaren we hem; bij Stop
-# kijken we opnieuw, want dan kan Claude Code net een nieuwe samenvatting
+# The title comes from the transcript. Once found we keep it; on Stop we look
+# again, because Claude Code may just have written a new summary.
 # hebben weggeschreven.
 $title = $prevTitle
 if (-not $title -or $ev -eq 'Stop') {
@@ -137,8 +137,8 @@ if (-not $title -or $ev -eq 'Stop') {
     if ($t) { $title = $t }
 }
 
-# Het venster waarin deze sessie draait. Een keer opzoeken is genoeg; daarna
-# hoeft het dashboard alleen nog de titel van dat venster te lezen.
+# The window this session runs in. Looking it up once is enough; after that we
+# only need to read that window's title.
 $hostPid = $prevHost
 if ($hostPid -le 0 -and $owner.OwnerPid -gt 0) { $hostPid = Get-DashHostPid ([int]$owner.OwnerPid) }
 
@@ -146,20 +146,20 @@ $status = [ordered]@{
     session_id  = $j.session_id
     event       = $ev                  # SessionStart | UserPromptSubmit | PreToolUse | PostToolUse | Notification | Stop | SessionEnd
     state       = (Get-DashState $ev)
-    tool        = [string]$j.tool_name # bij de tool-hooks: waar Claude mee bezig is
-    title       = $title            # echte naam van de sessie, uit het transcript
+    tool        = [string]$j.tool_name # on the tool hooks: what Claude is busy with
+    title       = $title            # real session name, from the transcript
     cwd         = $j.cwd
-    prompt      = $prompt              # laatste opdracht (ingekort) -> "waar mee bezig"
-    message     = $msg                 # bij Notification: waarom er aandacht nodig is
-    owner_pid   = $owner.OwnerPid      # PID van het Claude-proces
-    owner_start = $owner.Start         # starttijd, tegen hergebruikte PID's
-    host_pid    = $hostPid             # het terminalvenster; daar staat de tabtitel
+    prompt      = $prompt              # last instruction (shortened) -> "what it is doing"
+    message     = $msg                 # on Notification: why attention is needed
+    owner_pid   = $owner.OwnerPid      # PID of the Claude process
+    owner_start = $owner.Start         # start time, against reused PIDs
+    host_pid    = $hostPid             # the terminal window; that holds the tab title
     updated     = (Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz')
 }
 $status | ConvertTo-Json | Set-Content -Path $file -Encoding UTF8
 
 # ---------------------------------------------------------------------------
-# Windows-melding zodra een sessie op je wacht.
+# Windows notification as soon as a session is waiting for you.
 # ---------------------------------------------------------------------------
 if ($ToastEnabled -and ($ev -eq 'Notification' -or $ev -eq 'Stop')) {
     $leaf = ''
@@ -188,8 +188,8 @@ if ($ToastEnabled -and ($ev -eq 'Notification' -or $ev -eq 'Stop')) {
 }
 
 # ---------------------------------------------------------------------------
-# Alle beacons bundelen. -Prune gooit afgeronde sessies en beacons van
-# verdwenen processen meteen weg, dus de map blijft klein en eerlijk.
+# Merge every beacon. -Prune drops finished sessions and beacons of vanished
+# processes right away, so the folder stays small and honest.
 # ---------------------------------------------------------------------------
 $sessions = Get-DashSessions -Dir $dir -Prune
 [void](Write-DashPayload -Root $PSScriptRoot -Sessions $sessions)

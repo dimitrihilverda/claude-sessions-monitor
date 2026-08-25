@@ -93,7 +93,7 @@ yourself, otherwise the title Claude Code maintains, otherwise the first
 instruction, otherwise the folder name.
 
 ```
-powershell -ExecutionPolicy Bypass -File check-titels.ps1
+powershell -ExecutionPolicy Bypass -File check-titles.ps1
 ```
 
 shows which source is used for each session.

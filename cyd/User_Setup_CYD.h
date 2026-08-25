@@ -1,13 +1,16 @@
 // ===========================================================================
-//  User_Setup_CYD.h -- TFT_eSPI-instellingen voor de Cheap Yellow Display
-//  (ESP32-2432S028R, 2,8" ILI9341 320x240)
+//  User_Setup_CYD.h -- TFT_eSPI settings for the Cheap Yellow Display
+//  (ESP32-2432S028R, 2.8" ILI9341 320x240)
 //
-//  Kopieer dit bestand als User_Setup.h over
-//    <Documenten>\Arduino\libraries\TFT_eSPI\User_Setup.h
-//  of zet in User_Setup_Select.h een #include naar dit bestand.
+//  Copy this file over
+//    <Documents>\Arduino\libraries\TFT_eSPI\User_Setup.h
+//  or add an #include pointing here in User_Setup_Select.h.
 //
-//  Staan je kleuren omgekeerd (blauw waar rood moet zijn)? Wissel dan
-//  ILI9341_2_DRIVER voor ILI9341_DRIVER. Er zijn twee CYD-varianten in omloop.
+//  Note that updating TFT_eSPI overwrites User_Setup.h again.
+//
+//  Colours swapped (blue where red should be)? Then change ILI9341_2_DRIVER to
+//  ILI9341_DRIVER -- there are two CYD variants in circulation. That is a
+//  different problem from inverted colours; see TFT_INVERSION_ON below.
 // ===========================================================================
 
 #define ILI9341_2_DRIVER
@@ -24,15 +27,20 @@
 #define TFT_BL      21
 #define TFT_BACKLIGHT_ON HIGH
 
-// Dit CYD-paneel start met omgekeerde kleuren op: stuur je magenta, dan toont
-// hij groen. Geen van de ILI9341-init-sequenties in TFT_eSPI stuurt zelf een
-// inversie-commando, dus zetten we het hier. TFT_eSPI stuurt dan 0x21 (INVON)
-// direct na de init (zie TFT_eSPI.cpp, rond regel 774).
+// This CYD panel powers up with its colours inverted: send magenta and it shows
+// green. None of the ILI9341 init sequences in TFT_eSPI send an inversion
+// command themselves, so we set it here. TFT_eSPI then sends 0x21 (INVON) right
+// after the init (see TFT_eSPI.cpp, around line 774).
+//
+// Worth knowing because of how it fails: inverted, two different dark shades
+// both come out as light beige, so changing a colour looks like nothing
+// happened at all rather than like something is wrong.
 #define TFT_INVERSION_ON
 
 
-// Touch zit op de CYD op een tweede SPI-bus (MISO 39, MOSI 32, CLK 25, CS 33)
-// en werkt dus niet via TFT_eSPI. De sketch gebruikt geen touch.
+// On the CYD the touch controller sits on a second SPI bus (MISO 39, MOSI 32,
+// CLK 25, CS 33) and therefore does not work through TFT_eSPI. The sketch talks
+// to it directly with XPT2046_Touchscreen, so leave this commented out.
 // #define TOUCH_CS 33
 
 #define LOAD_GLCD

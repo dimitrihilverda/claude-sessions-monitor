@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 #  langlib.ps1 -- user-visible text, in the language of Windows
 #
 #  Every string a person actually reads lives here, not scattered through the
@@ -96,6 +96,12 @@ $script:LANGS = @{
         'err.badToken'         = 'error: wrong token'
         'err.needsAttention'   = 'error: {0} only works when that session is waiting'
         'ok.action'            = 'ok {0}'
+
+        # ---- default button labels (actions.json refers to these by labelKey)
+        'action.approve'       = 'Approve'
+        'action.reject'        = 'Reject'
+        'action.snooze'        = 'Snooze {0} min'
+        'action.focus'         = 'Go to window'
     }
 
     nl = @{
@@ -163,6 +169,11 @@ $script:LANGS = @{
         'err.badToken'         = 'fout: verkeerd token'
         'err.needsAttention'   = 'fout: {0} kan alleen als die sessie wacht'
         'ok.action'            = 'ok {0}'
+
+        'action.approve'       = 'Goedkeuren'
+        'action.reject'        = 'Weigeren'
+        'action.snooze'        = 'Snooze {0} min'
+        'action.focus'         = 'Naar het venster'
     }
 }
 

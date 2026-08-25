@@ -1,37 +1,38 @@
 {
-  "_uitleg": "Wat de knoppen op de CYD doen. De CYD stuurt alleen het knopnummer; dit bestand bepaalt de betekenis. Aanpassen kan zonder opnieuw te flashen - de API leest het bij elke druk opnieuw.",
+  "_readme": "What the buttons on the display do. The display only sends the button number; this file decides the meaning. You can edit it without reflashing - the API re-reads it on every press.",
+  "_labels": "Leave 'label' out to get the name from langlib.ps1 via 'labelKey', so the buttons follow your Windows display language. Set an explicit 'label' to override that with your own text.",
   "token": "",
   "keyDelayMs": 250,
   "buttons": {
     "1": {
-      "label": "Goedkeuren",
+      "labelKey": "action.approve",
       "type": "keys",
       "send": "{ENTER}",
       "requireAttention": true,
-      "_uitleg": "Haalt het venster naar voren en bevestigt de gemarkeerde keuze. Werkt alleen als die sessie echt om aandacht vraagt."
+      "_readme": "Brings the window to the front and confirms the highlighted choice. Only works when that session is genuinely asking for attention."
     },
     "2": {
-      "label": "Weigeren",
+      "labelKey": "action.reject",
       "type": "keys",
       "send": "{ESC}",
       "requireAttention": true
     },
     "3": {
-      "label": "Snooze 10 min",
+      "labelKey": "action.snooze",
       "type": "snooze",
       "minutes": 10
     },
     "4": {
-      "label": "Naar het venster",
+      "labelKey": "action.focus",
       "type": "focus",
-      "_uitleg": "Knop 4 is de BOOT-knop van de CYD; die kun je tijdens het draaien gewoon gebruiken."
+      "_readme": "Button 4 is the CYD's own BOOT button; you can use it freely while it is running. Holding it for two seconds opens the cracktro instead."
     }
   },
   "_types": {
-    "focus": "venster van de sessie naar voren halen",
-    "keys": "venster naar voren halen en toetsen sturen (SendKeys: {ENTER} {ESC} {TAB} ^c y~ ...)",
-    "snooze": "sessie 'minutes' minuten stil zetten: geen oranje, geen piepje",
-    "run": "programma of commando starten, veld 'command' (+ optioneel 'args'); {cwd} wordt vervangen door de map van de sessie",
-    "open": "map, bestand of url openen, veld 'path' ({cwd} mag)"
+    "focus": "bring the session's window to the front",
+    "keys": "bring the window forward and send keys (SendKeys: {ENTER} {ESC} {TAB} ^c y~ ...)",
+    "snooze": "silence a session for 'minutes' minutes: no orange, no beep",
+    "run": "start a program or command, field 'command' (plus optional 'args'); {cwd} is replaced by the session's folder",
+    "open": "open a folder, file or url, field 'path' ({cwd} allowed)"
   }
 }

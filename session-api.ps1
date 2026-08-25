@@ -1,32 +1,32 @@
 ﻿# =============================================================================
-#  session-api.ps1 -- webservice met je live Claude-sessies, voor de Cheap
-#  Yellow Display (en je telefoon).
+#  session-api.ps1 -- web service exposing your live Claude sessions, for the
+#  Cheap Yellow Display (and your phone).
 #
-#  Starten:  powershell -ExecutionPolicy Bypass -File session-api.ps1
-#  Of stil:  wscript.exe api.vbs
+#  Start:  powershell -ExecutionPolicy Bypass -File session-api.ps1
+#  Quiet:  wscript.exe api.vbs
 #
 #  Endpoints:
-#    GET /cyd.txt              platte tekst, 1 regel per sessie -- voor de ESP32
-#    GET /sessions.json        dezelfde data als JSON
-#    GET /focus?id=<sid>       venster van die sessie naar voren halen (tikken)
-#    GET /action?id=<sid>&b=N  knopactie N uitvoeren (zie actions.json)
-#    GET /                     piepklein statuspaginaatje (ook op je telefoon)
+#    GET /cyd.txt              plain text, one line per session -- for the ESP32
+#    GET /sessions.json        the same data as JSON
+#    GET /focus?id=<sid>       bring that session's window to the front (tapping)
+#    GET /action?id=<sid>&b=N  run button action N (see actions.json)
+#    GET /                     a tiny status page (fine on a phone)
 #
-#  Gebruikt System.Net.Sockets.TcpListener in plaats van HttpListener: die
-#  laatste heeft op een niet-verhoogde prompt een urlacl-reservering nodig.
-#  De eerste keer vraagt Windows Firewall wel om toestemming -- kies
-#  "Prive-netwerken toestaan". Of vooraf, in een admin-prompt:
-#    netsh advfirewall firewall add rule name="Claude sessie-API" ^
+#  Uses System.Net.Sockets.TcpListener rather than HttpListener: the latter
+#  needs a urlacl reservation when run from a non-elevated prompt.
+#  The first time, Windows Firewall does ask for permission -- choose
+#  "allow on private networks". Or up front, from an admin prompt:
+#    netsh advfirewall firewall add rule name="Claude sessions API" ^
 #      dir=in action=allow protocol=TCP localport=8787
 #
-#  LET OP: /action kan toetsen naar je terminal sturen. Iedereen op je netwerk
-#  kan dat aanroepen. Zet daarom "token" in actions.json als je op een netwerk
-#  zit dat je niet vertrouwt; de CYD stuurt hem dan mee.
+#  WARNING: /action can send keystrokes into your terminal, and anyone on your
+#  network can call it. Set "token" in actions.json if you are on a network you
+#  do not trust; the display will send it along.
 # =============================================================================
 param(
     [int]$Port = 8787,
-    # Hoe lang de sessielijst hergebruikt mag worden. 0 = altijd opnieuw opbouwen
-    # (het oude gedrag, traag). Zie de uitleg bij Get-SessieCache.
+    # How long the session list may be reused. 0 = rebuild every time (the old
+    # behaviour, slow). See the explanation at Get-SessieCache.
     [int]$CacheMs = 1500
 )
 $ErrorActionPreference = 'Continue'
@@ -49,8 +49,20 @@ function Write-DashLog([string]$txt) {
     } catch { }
 }
 
+<#
+  The label shown on a button. An explicit "label" in actions.json always wins;
+  without one we fall back to "labelKey", which points at langlib.ps1 so the
+  buttons follow the Windows display language like everything else. Any
+  "minutes" is passed in, which is what makes "Snooze {0} min" work.
+#>
+function Get-ButtonLabel($def, [string]$btn) {
+    if ($def -and $def.label)    { return [string]$def.label }
+    if ($def -and $def.labelKey) { return (T ([string]$def.labelKey) @($def.minutes)) }
+    return "$btn"
+}
+
 function Get-Actions {
-    # elke keer opnieuw lezen: dan werkt een wijziging meteen
+    # re-read every time: that way an edit takes effect immediately
     if (-not (Test-Path $ActionsPath)) { return $null }
     try { return (Get-Content $ActionsPath -Raw -Encoding UTF8 | ConvertFrom-Json) } catch { return $null }
 }
@@ -63,35 +75,35 @@ function Get-Payload($all) {
     return (Write-DashPayload -Root $Root -Sessions $all)
 }
 
-# ---- platte tekst voor de ESP32 --------------------------------------------
-# Regel 1:  #<attention>|<active>|<done>|<HH:mm:ss>
-# Daarna :  <state>|<naam>|<sinds>|<waarom>|<session_id>
-# Losse regels, geen JSON: dan heeft de sketch geen ArduinoJson nodig.
+# ---- plain text for the ESP32 -----------------------------------------------
+# Line 1:  the header described below
+# Then  :  <state>|<name>|<since>|<why>|<session_id>
+# Separate lines, no JSON: that way the sketch needs no JSON library.
 function Format-Cyd($p) {
-    # De knoplabels gaan mee in de kopregel, zodat de CYD onder in beeld laat
-    # zien wat de drie knoppen doen. Pas je actions.json aan, dan verandert het
-    # schermpje mee -- zonder opnieuw te flashen.
+    # The button labels travel in the header line, so the display can show what the
+    # three buttons do. Edit actions.json and the display follows -- without
+    # reflashing.
     $labels = @()
     $cfg = Get-Actions
     foreach ($n in @('1','2','3')) {
         $l = ''
-        if ($cfg -and $cfg.buttons -and $cfg.buttons.PSObject.Properties[$n]) { $l = [string]$cfg.buttons.$n.label }
+        if ($cfg -and $cfg.buttons -and $cfg.buttons.PSObject.Properties[$n]) { $l = Get-ButtonLabel $cfg.buttons.$n $n }
         $labels += ($l -replace '[\r\n\|;]', ' ')
     }
 
     <#
-      De kopregel draagt ook de teksten voor het schermpje, zodat de CYD de taal
-      van deze pc volgt zonder eigen tabel en zonder opnieuw te flashen.
+      The header line also carries the display's text, so it follows the
+      language of this PC without a table of its own and without reflashing.
 
-        veld 1  #<attention>
-        veld 2  <active>
-        veld 3  <done>
-        veld 4  <HH:mm>            -- zonder seconden: op een klein scherm is
-                                      een meetellende secondeteller alleen onrust
-        veld 5  knoplabels          gescheiden door ;
-        veld 6  kopregeltekst       al samengesteld hier, want alleen de pc weet
-                                    of het "1 needs you" of "2 need you" is
-        veld 7  statuslabels        attention;active;done;geen-sessies
+        field 1  #<attention>
+        field 2  <active>
+        field 3  <done>
+        field 4  <HH:mm>           -- no seconds: on a small screen a ticking
+                                     seconds counter is nothing but restlessness
+        field 5  button labels      separated by ;
+        field 6  header text        composed here, because only the PC knows
+                                    whether it is "1 needs you" or "2 need you"
+        field 7  state labels       attention;active;done;no-sessions
     #>
     $kop =
         if     ($p.attention -gt 0) { T 'cyd.waitingCount' @($p.attention, $(if ($p.attention -eq 1) { '' } else { $(if ($script:DashLang -eq 'nl') { 'EN' } else { '' }) })) }
@@ -108,7 +120,7 @@ function Format-Cyd($p) {
 \|;]', ' ')).Append('|').Append($statusLabels).Append("`n")
     foreach ($s in $p.sessions) {
         $why = ([string]$s.why -replace '[\r\n\|]', ' ')
-        # de naam is de titel van de sessie; zet de map ervoor in de tweede regel
+        # the name is the session title; put the folder in front of the second line
         if ($s.folder) { $why = ([string]$s.folder -replace '[\r\n\|]', ' ') + ' - ' + $why }
         if ($why.Length -gt 64) { $why = $why.Substring(0, 64) }
         $nm = ([string]$s.name -replace '[\r\n\|]', ' ')
@@ -161,7 +173,7 @@ function Set-DashSnooze([string]$sid, [int]$minutes) {
     } catch { return $false }
 }
 
-# ---- knopacties -------------------------------------------------------------
+# ---- button actions ---------------------------------------------------------
 function Invoke-DashAction($sess, [string]$btn) {
     $cfg = Get-Actions
     if (-not $cfg) { return (T 'err.noActions') }
@@ -169,14 +181,14 @@ function Invoke-DashAction($sess, [string]$btn) {
     if ($cfg.buttons -and $cfg.buttons.PSObject.Properties[$btn]) { $def = $cfg.buttons.$btn }
     if (-not $def) { return (T 'err.buttonUnset' @($btn)) }
 
-    $label = if ($def.label) { [string]$def.label } else { "knop $btn" }
+    $label = Get-ButtonLabel $def $btn
     $type  = ([string]$def.type).ToLower()
     $name  = [string]$sess.name
 
-    # Toetsen alleen sturen als de sessie er ook echt om vraagt: een misklik
-    # mag geen Enter in een sessie duwen die gewoon aan het werk is.
+    # Only send keys when the session is genuinely asking for them: a mis-tap must
+    # not push Enter into a session that is simply working.
     if ($def.requireAttention -and $sess.state -ne 'attention') {
-        Write-DashLog "GEWEIGERD $label op $name -- sessie vraagt geen aandacht (state=$($sess.state))"
+        Write-DashLog "REFUSED $label on $name -- that session is not asking for anything (state=$($sess.state))"
         return (T 'err.needsAttention' @($label))
     }
 
@@ -184,14 +196,14 @@ function Invoke-DashAction($sess, [string]$btn) {
         'focus' {
             $w = Invoke-DashSessionFocus -Session $sess
             if ($w) { Write-DashLog "$label -> $name : $($w.Title)"; return (T 'ok.action' @($label)) }
-            Write-DashLog "$label -> $name : geen venster gevonden"
+            Write-DashLog "$label -> $name : no window found"
             return (T 'err.noWindow')
         }
         'keys' {
             $keys = [string]$def.send
             if (-not $keys) { return (T 'err.noKeys') }
             $best = Get-DashBestWindow -Cwd ([string]$sess.cwd) -OwnerPid ([int]$sess.owner_pid)
-            if (-not $best) { Write-DashLog "$label -> $name : geen venster"; return (T 'err.noWindow') }
+            if (-not $best) { Write-DashLog "$label -> $name : no window"; return (T 'err.noWindow') }
             $delay = 250
             if ($cfg.keyDelayMs) { $delay = [int]$cfg.keyDelayMs }
             if (Send-DashKeys -Handle $best.Handle -Keys $keys -DelayMs $delay) {
@@ -214,7 +226,7 @@ function Invoke-DashAction($sess, [string]$btn) {
             $cmd = ([string]$def.command) -replace '\{cwd\}', [string]$sess.cwd
             if (-not $cmd) { return (T 'err.noCommand') }
             try {
-                # niet $args gebruiken: dat is een automatische variabele
+                # do not use $args: that is an automatic variable
                 $argstr = ([string]$def.args) -replace '\{cwd\}', [string]$sess.cwd
                 if ($argstr) { Start-Process -FilePath $cmd -ArgumentList $argstr } else { Start-Process -FilePath $cmd }
                 Write-DashLog "$label -> $name : $cmd $argstr"
@@ -247,20 +259,20 @@ function Split-Query([string]$qs) {
 }
 
 <#
-  Sessielijst kort cachen.
+  Cache the session list briefly.
 
-  Get-Sessions gaat via sessionlib naar Get-CimInstance Win32_Process, en zo'n
-  WMI-procesquery kost honderden milliseconden -- per sessie. Gemeten: 1,4 s per
-  verzoek, met uitschieters naar 4,25 s als WMI traag is. Dat werd bij elk
-  verzoek opnieuw gedaan, terwijl de CYD elke 3 seconden vraagt.
+  Get-Sessions goes through sessionlib to Get-CimInstance Win32_Process, and
+  a WMI process query costs hundreds of milliseconds -- per session.
+  Measured: 1.4 s per request, with spikes to 4.25 s when WMI is slow, and
+  that was redone on every request while the display asks every 3 seconds.
 
-  Gevolg: de CYD (time-out 2,5 s) liep op de uitschieters vast, en omdat deze
-  server een enkele AcceptTcpClient-lus is wachtte een tweede client daar nog
-  eens bovenop. Dat gaf het beeld "soms werkt het, soms niet".
+  The result: the display (2.5 s timeout) gave up on the spikes, and because
+  this server is a single AcceptTcpClient loop, a second client queued behind
+  that as well. Hence "sometimes it works, sometimes it does not".
 
-  Met een cache van standaard 1500 ms wordt vrijwel elk verzoek uit het geheugen
-  bediend. De stand is dan maximaal anderhalve seconde oud; dat merk je niet aan
-  iets dat op menselijke snelheid verandert, en het scheelt een factor duizend.
+  With a cache of 1500 ms by default, nearly every request is served from
+  memory. State is then at most a second and a half old -- unnoticeable on
+  something that changes at human speed, and a thousandfold cheaper.
 #>
 $script:cacheAt   = [datetime]::MinValue
 $script:cacheAll  = $null
@@ -276,7 +288,7 @@ function Get-SessieCache {
     return @{ all = $script:cacheAll; payload = $script:cachePay }
 }
 
-# Na een actie is de cache achterhaald: de volgende poll moet het gevolg zien.
+# After an action the cache is stale: the next poll must see the result.
 function Reset-SessieCache { $script:cacheAt = [datetime]::MinValue }
 
 $listener = New-Object System.Net.Sockets.TcpListener ([System.Net.IPAddress]::Any), $Port
@@ -338,7 +350,7 @@ while ($true) {
                     foreach ($s in ($all | Where-Object { $_.visible })) {
                         if ($s.session_id -eq $sid) { $sess = $s; break }
                     }
-                    # geen id meegestuurd? dan de sessie die het langst wacht
+                    # no id sent? then the session that has been waiting longest
                     if (-not $sess) {
                         $sess = @($all | Where-Object { $_.visible -and $_.state -eq 'attention' } | Sort-Object sort_ts)[0]
                     }
@@ -378,7 +390,7 @@ while ($true) {
         $ns.Write($bytes, 0, $bytes.Length)
         $ns.Flush()
     } catch {
-        # stille verbinding of time-out: gewoon door
+        # a silent connection or a timeout: just carry on
     } finally {
         if ($client) { try { $client.Close() } catch { } }
     }

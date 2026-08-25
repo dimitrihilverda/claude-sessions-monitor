@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-build-pakket.py -- zet het installeerbare zipje in elkaar.
+build-pakket.py -- assembles the installable zip.
 
-    python build-pakket.py [uitvoermap]
+    python build-pakket.py [output-dir]
 
-Neemt de HUD, de gedeelde bibliotheken, de hookbeacon en de installer mee.
-De dashboardpagina en alles wat met de geplande taak te maken heeft blijft
-eruit: dat is persoonlijk en niet nodig om de HUD te draaien.
+Includes the HUD, the shared libraries, the hook beacon and the installer.
+Anything personal stays out: the dashboard page and the generated session data
+are not needed to run the HUD, and would leak your prompts.
 """
 import os, sys, zipfile, hashlib
 
@@ -14,7 +14,7 @@ HIER = os.path.dirname(os.path.abspath(__file__))
 UIT  = sys.argv[1] if len(sys.argv) > 1 else HIER
 NAAM = "ClaudeDeck"
 
-# (bron, pad in het zipje)
+# (source, path inside the zip)
 BESTANDEN = [
     ("installer/Install.cmd",     "Install.cmd"),
     ("installer/install.ps1",    "install.ps1"),
@@ -28,8 +28,8 @@ BESTANDEN = [
     ("beacon.ps1",               "beacon.ps1"),
     ("hud.ps1",                  "hud.ps1"),
     ("hud.vbs",                  "hud.vbs"),
-    ("check-titels.ps1",         "check-titels.ps1"),
-    ("zoek-titel.ps1",           "zoek-titel.ps1"),
+    ("check-titles.ps1",         "check-titles.ps1"),
+    ("find-title.ps1",           "find-title.ps1"),
     ("session-api.ps1",          "session-api.ps1"),
     ("api.vbs",                  "api.vbs"),
     ("actions.json",             "actions.json"),
@@ -38,13 +38,13 @@ MAPPEN = [
     ("cyd",  "cyd"),
     ("case", "case"),
 ]
-# hier hoeft niemand anders iets mee
-OVERSLAAN = {"preview.png"}   # blijft wel in de repo, maar niet in het zipje
+# nobody else needs this
+OVERSLAAN = {"preview.png"}   # stays in the repo, but not in the zip
 
 
 def voeg_toe(zf, bron, doel):
     if not os.path.exists(bron):
-        print("  ! ontbreekt:", bron)
+        print("  ! missing:", bron)
         return 0
     zf.write(bron, "%s/%s" % (NAAM, doel))
     return os.path.getsize(bron)
@@ -59,7 +59,7 @@ def main():
         for bronmap, doelmap in MAPPEN:
             vol = os.path.join(HIER, bronmap)
             if not os.path.isdir(vol):
-                print("  ! map ontbreekt:", bronmap)
+                print("  ! folder missing:", bronmap)
                 continue
             for wortel, _, files in os.walk(vol):
                 for f in sorted(files):
@@ -71,7 +71,7 @@ def main():
 
     with open(zippad, "rb") as f:
         sha = hashlib.sha256(f.read()).hexdigest()
-    print("%s  (%.0f kB uit %.0f kB aan bestanden)"
+    print("%s  (%.0f kB from %.0f kB of files)"
           % (zippad, os.path.getsize(zippad) / 1024.0, totaal / 1024.0))
     print("sha256: " + sha)
 

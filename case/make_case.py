@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-make_case.py -- behuizing voor de Claude-deck: een Cheap Yellow Display op een
-standaard met een rij van drie toetsen eronder.
+make_case.py -- a case for the deck: a Cheap Yellow Display on a stand with a
+row of three buttons underneath.
 
-Er worden twee varianten gemaakt:
+Two variants are produced:
 
-  deck-plat-*.stl      vlak en laag (<= 30 mm), achterkant loopt schuin weg.
-                       Grotere voetafdruk: bij een vlakke hoek heeft hetzelfde
-                       bedieningsvlak nu eenmaal meer diepte nodig.
-  deck-compact-*.stl   steiler en kleiner van voetafdruk, maar hoger.
+  deck-plat-*.stl      flat and low (<= 30 mm), with the back sloping away.
+                       Larger footprint: at a shallow angle the same control
+                       surface simply needs more depth.
+  deck-compact-*.stl   steeper and smaller in footprint, but taller.
 
-Let op de wisselwerking: hoe vlakker de hoek, hoe dunner de voorkant van de
-behuizing wordt -- en daar moet de body van je toetsen nog in passen. Het script
-rekent de voorrand daarop uit en meldt per variant hoeveel ruimte er overblijft.
+Mind the trade-off: the shallower the angle, the thinner the front of the case
+becomes -- and your switch bodies still have to fit in there. The script derives
+the front edge from that and reports how much room is left for each variant.
 
     pip install trimesh manifold3d shapely
     python make_case.py
@@ -20,26 +20,26 @@ rekent de voorrand daarop uit en meldt per variant hoeveel ruimte er overblijft.
 import numpy as np, trimesh, math
 from shapely.geometry import Polygon
 
-# ------------------------------------------------------------------ varianten
+# ------------------------------------------------------------------- variants
 VARIANTEN = [
     dict(naam="deck-plat",    a_deg=9.0,  back_tilt=20.0, margin_top=10.0, max_h=30.0),
     dict(naam="deck-compact", a_deg=26.0, back_tilt=6.0,  margin_top=9.0,  max_h=99.0),
 ]
 
-SWITCH     = "MX"    # "MX" (Cherry-achtig) of "CHOC" (Kailh low profile, veel platter)
+SWITCH     = "MX"    # "MX" (Cherry-like) or "CHOC" (Kailh low profile, much flatter)
 
-WALL       = 2.4     # wanddikte
-FACE_THK   = 3.0     # dikte van het bedieningsvlak
-BEZEL      = 1.8     # lip waar de print tegenaan valt
-CLR        = 0.4     # speling rondom de print
-R_EDGE     = 3.0     # afronding van de zijprofiel-randen
-R_CORNER   = 6.0     # afronding van de vier staande hoeken
-R_SCREEN   = 2.5     # afronding van de hoeken van het schermgat
-CHAMFER    = 1.2     # afschuining rondom het schermgat
+WALL       = 2.4     # wall thickness
+FACE_THK   = 3.0     # thickness of the control surface
+BEZEL      = 1.8     # lip the board rests against
+CLR        = 0.4     # clearance around the board
+R_EDGE     = 3.0     # rounding of the side-profile edges
+R_CORNER   = 6.0     # rounding of the four standing corners
+R_SCREEN   = 2.5     # rounding of the screen opening's corners
+CHAMFER    = 1.2     # chamfer around the screen opening
 
-# CYD-printplaat (ESP32-2432S028R) -- nameten!
+# CYD board (ESP32-2432S028R) -- measure yours!
 PCB_W, PCB_H, PCB_THK = 86.5, 50.3, 1.6
-PCB_BACK   = 8.0     # ruimte die de onderdelen op de achterkant nodig hebben
+PCB_BACK   = 8.0     # room the components on the back need
 SCREEN_W, SCREEN_H = 57.6, 43.2
 SCREEN_OFF_U = (PCB_W - SCREEN_W) / 2
 SCREEN_OFF_V = (PCB_H - SCREEN_H) / 2
@@ -52,35 +52,34 @@ RELIEF, N_KEYS = CUT_U + 1.55, 3
 
 MARGIN_BOT = 5.5
 KEY_BAND   = KEYCAP + 0.5
-GAP        = 10.0    # tussen toetsen en print; hier zitten de twee pilaren
+GAP        = 10.0    # between buttons and board; the two posts live here
 SIDE_MARG  = 1.6
 USB_V, USB_SLOT_V, USB_SLOT_W = PCB_H / 2, 15.0, 11.0
 HOOK_OVER, HOOK_LEN, HOOK_THK = 2.5, 26.0, 2.0
 BOSS_D, BOSS_H, BOSS_HOLE = 7.0, 6.0, 2.6
 
-# Grondplaat: valt in de onderkant en schroeft vast in vier hoekklossen.
-# De onderranden zijn daarom niet afgerond -- de plaat moet vlak aansluiten.
-PLATE_T    = 2.5     # dikte van de grondplaat
-PLATE_CLR  = 0.35    # speling rondom, zodat hij er zonder schuren in valt
-PLATE_HOLE = 3.4     # doorvoergat M3
-PLATE_CB_D = 6.4     # verzinking voor de schroefkop
+# Base plate: drops into the underside and screws into four corner bosses.
+# The bottom edges are therefore not rounded -- the plate must sit flush.
+PLATE_T    = 2.5     # thickness of the base plate
+PLATE_CLR  = 0.35    # clearance all round, so it drops in without rubbing
+PLATE_HOLE = 3.4     # M3 through hole
+PLATE_CB_D = 6.4     # countersink for the screw head
 PLATE_CB_T = 1.4
-FOOT_HOLE  = 2.6     # voorgat in de klos; M3 snijdt daar zijn eigen draad
-FOOT_IN    = 6.5     # hoever de klossen uit de hoek liggen
-FOOT_SZ    = 11.0    # doorsnede van de klos
-FOOT_BACK  = 14.0    # de achterste klossen liggen verder naar voren: de
-                     # achterwand loopt schuin, dus daar is bovenin minder
-                     # ruimte dan onderin
+FOOT_HOLE  = 2.6     # pilot hole in the boss; M3 cuts its own thread there
+FOOT_IN    = 6.5     # how far the bosses sit from the corner
+FOOT_SZ    = 11.0    # diameter of the boss
+FOOT_BACK  = 14.0    # the rear bosses sit further forward: the back wall
+                     # slopes, so there is less room at the top than at
+                     # the bottom
 
 
 def export_solid(mesh, pad):
-    """Exporteren en meteen controleren of het bestand ook echt dicht is.
+    """Export, then immediately check that the file really is closed.
 
-       STL slaat punten op in float32. Twee punten die in het geheugen net
-       niet gelijk zijn, worden dan twee verschillende punten en je slicer ziet
-       open randen. Daarom eerst op een raster van 0,0001 mm zetten en
-       samenvoegen -- en als dat het model juist beschadigt, exporteren we het
-       origineel en zeggen we dat erbij."""
+       STL stores points in float32. Two points that are only just unequal in
+       memory become two different points, and your slicer sees open edges. So
+       snap to a 0.0001 mm grid and merge first -- and if that damages the model
+       instead, export the original and say so."""
     kandidaat = mesh.copy()
     kandidaat.vertices = np.round(kandidaat.vertices, 4)
     kandidaat.merge_vertices()
@@ -92,17 +91,17 @@ def export_solid(mesh, pad):
         m = mesh
     terug = trimesh.load(pad)
     if not terug.is_watertight:
-        print("   LET OP: %s is niet volledig gesloten -- je slicer repareert dit meestal zelf" % pad)
+        print("   NOTE: %s is not fully closed -- your slicer usually repairs this itself" % pad)
     return m
 
 
 def finish(mesh):
-    """Punten die op elkaar liggen samenvoegen voor het exporteren: STL slaat op
-       in float32 en zonder deze stap meldt je slicer een 'open' model.
+    """Merge coincident points before exporting: STL stores float32, and without
+       this step your slicer reports an 'open' model.
 
-       Voorzichtig doen: bij een vlakke hoek levert de booleaanse bewerking
-       flinterdunne driehoekjes op, en die opruimen kan juist gaatjes maken.
-       Wordt het model er niet beter van, dan houden we het origineel."""
+       Do it carefully: at a shallow angle the boolean operation produces
+       paper-thin triangles, and cleaning those up can create holes instead. If
+       the model does not improve, keep the original."""
     m = mesh.copy()
     m.merge_vertices()
     m.fix_normals()
@@ -122,8 +121,8 @@ def build(naam, a_deg, back_tilt, margin_top, max_h):
     U_PCB0 = (W - PCB_W) / 2
     V_PCB1 = V_PCB0 + PCB_H
 
-    # De voorrand precies zo hoog als de toetsen nodig hebben. De grondplaat
-    # telt mee: de body van de schakelaars moet er bovenlangs passen.
+    # Make the front edge exactly as tall as the buttons need. The base plate
+    # counts: the switch bodies have to clear it.
     FRONT_H  = max(3.0, SW_DEPTH * COS + PLATE_T - V_KEYS * SIN + 0.6)
     D_FACE   = FACE_L * COS
     H        = FRONT_H + FACE_L * SIN
@@ -133,18 +132,18 @@ def build(naam, a_deg, back_tilt, margin_top, max_h):
     clear_keys = (FRONT_H + V_KEYS * SIN - PLATE_T) / COS
     clear_back = margin_top * math.sin(math.pi - A - (math.pi / 2 - BT))
 
-    print("\n%s: %.1f breed x %.1f diep x %.1f hoog mm" % (naam, W, D, H))
-    print("   vlak %.1f mm bij %.0f graden, voorrand %.1f mm, achterkant %.0f graden uit het lood"
+    print("\n%s: %.1f wide x %.1f deep x %.1f high mm" % (naam, W, D, H))
+    print("   surface %.1f mm at %.0f degrees, front edge %.1f mm, back %.0f degrees off vertical"
           % (FACE_L, a_deg, FRONT_H, back_tilt))
-    print("   ruimte tussen de toetsen en de grondplaat %.1f mm (nodig %.1f voor %s)"
+    print("   room between the buttons and the base plate %.1f mm (need %.1f for %s)"
           % (clear_keys, SW_DEPTH, SWITCH.upper()))
-    print("   ruimte achter de bovenrand van de print %.1f mm (nodig ~%.1f)" % (clear_back, PCB_BACK))
-    if H > max_h:      print("   LET OP: hoger dan de gevraagde %.1f mm" % max_h)
+    print("   room behind the top edge of the board %.1f mm (need ~%.1f)" % (clear_back, PCB_BACK))
+    if H > max_h:      print("   NOTE: taller than the requested %.1f mm" % max_h)
     if clear_back < PCB_BACK - 0.2:
-        print("   LET OP: krap achter de print -- margin_top omhoog of back_tilt omlaag")
+        print("   NOTE: tight behind the board -- raise margin_top or lower back_tilt")
 
-    # ---- hulpjes in vlak-coordinaten (u = breedte, v = langs de helling,
-    #      w = uit het vlak naar buiten)
+    # ---- helpers in surface coordinates (u = width, v = along the slope,
+    #      w = out of the surface)
     def face_T():
         T = np.eye(4)
         T[:3, :3] = np.array([[1, 0, 0], [0, COS, -SIN], [0, SIN, COS]])
@@ -204,15 +203,15 @@ def build(naam, a_deg, back_tilt, margin_top, max_h):
     def z_inner(y):
         return FRONT_H + y * math.tan(A) - FACE_THK / COS
 
-    # ---- buitenvorm: wig met schuine achterkant, alle randen afgerond
-    # Het profiel loopt bewust door tot onder nul en wordt op z = 0 afgesneden:
-    # dan komen de afrondingen van de onderhoeken onder de snijlijn te liggen en
-    # houd je een kaarsrechte onderrand waar de grondplaat tegenaan sluit.
+    # ---- outer shape: a wedge with a sloping back, every edge rounded
+    # The profile deliberately runs below zero and is cut off at z = 0: that puts
+    # the roundings of the bottom corners below the cut line, leaving a dead
+    # straight bottom edge for the base plate to seat against.
     outer = side_prism(round_convex([(0, -R_EDGE - 1), (D, -R_EDGE - 1),
                                      (D_FACE, H), (0, FRONT_H)], R_EDGE), 0, W)
     outer = outer.intersection(plan_prism(0, W, 0, D, R_CORNER, 0, H + 1))
 
-    # ---- binnenholte, open onderkant
+    # ---- inner cavity, open at the bottom
     r_in   = max(R_EDGE - WALL, 0.8)
     tan_bt = math.tan(BT)
     C_in   = D - WALL / math.cos(BT)
@@ -225,9 +224,9 @@ def build(naam, a_deg, back_tilt, margin_top, max_h):
                                           max(R_CORNER - WALL, 0.8), -9, H + 1))
     shell = outer.difference(inner)
 
-    # ---- schermvenster met afgeronde hoeken en een afschuining van 45 graden.
-    # Elk snijlichaam steekt door het buitenvlak heen: een snijvlak dat precies
-    # samenvalt met het oppervlak laat de booleaanse bewerking ontsporen.
+    # ---- screen window with rounded corners and a 45 degree chamfer.
+    # Every cutting body pokes through the outer surface: a cutting face that
+    # coincides exactly with the surface derails the boolean operation.
     su0, sv0 = U_PCB0 + SCREEN_OFF_U, V_PCB0 + SCREEN_OFF_V
     su1, sv1 = su0 + SCREEN_W, sv0 + SCREEN_H
     OVER = 0.5
@@ -237,11 +236,11 @@ def build(naam, a_deg, back_tilt, margin_top, max_h):
     shell = shell.difference(loft(win_in, -40.0, win_in, 5.0))
     shell = shell.difference(loft(win_in, -CHAMFER, win_out, OVER))
 
-    # ---- uitsparing voor de print, met een lip van BEZEL
+    # ---- recess for the board, with a lip of BEZEL
     shell = shell.difference(face_box(U_PCB0 - CLR, U_PCB0 + PCB_W + CLR,
                                       V_PCB0 - CLR, V_PCB1 + CLR, -40, -BEZEL))
 
-    # ---- toetsen
+    # ---- buttons
     u_first = W / 2 - ((N_KEYS - 1) * PITCH) / 2
     for i in range(N_KEYS):
         u = u_first + i * PITCH
@@ -250,18 +249,18 @@ def build(naam, a_deg, back_tilt, margin_top, max_h):
         shell = shell.difference(face_box(u - RELIEF / 2, u + RELIEF / 2,
                                           V_KEYS - RELIEF / 2, V_KEYS + RELIEF / 2, -40, -PLATE))
 
-    # ---- kabelsleuf in de linkerwand
+    # ---- cable slot in the left wall
     vc = V_PCB0 + USB_V
     shell = shell.difference(face_box(-6.0, WALL + 3.0, vc - USB_SLOT_V / 2, vc + USB_SLOT_V / 2,
                                       -(BEZEL + USB_SLOT_W), -BEZEL + 0.6))
 
-    # ---- twee haken bovenaan: daar schuif je de bovenrand van de print onder
+    # ---- two hooks at the top: slide the board's top edge under these
     hw = BEZEL + PCB_THK + 0.3
     for du in (-1, 1):
         cu = W / 2 + du * (PCB_W / 4)
-        # De twee blokjes overlappen elkaar 0,8 mm. Laat je ze precies tegen
-        # elkaar aan eindigen, dan vallen twee vlakken samen en houdt de
-        # booleaanse bewerking daar een paar open randen over.
+        # The two blocks overlap by 0.8 mm. Let them end exactly against each
+        # other and two faces coincide, which leaves the boolean operation with
+        # a few open edges there.
         shell = shell.union(face_box(cu - HOOK_LEN / 2, cu + HOOK_LEN / 2,
                                      V_PCB1 - HOOK_OVER, V_PCB1 + CLR + 0.8,
                                      -(hw + HOOK_THK), -hw))
@@ -269,17 +268,17 @@ def build(naam, a_deg, back_tilt, margin_top, max_h):
                                      V_PCB1 + CLR, V_PCB1 + CLR + 3.0,
                                      -(hw + HOOK_THK), -FACE_THK + 0.01))
 
-    # ---- twee pilaren onder de print voor het klembalkje
+    # ---- two posts under the board for the clamp bar
     boss_v = V_PCB0 - (BOSS_D / 2 + 1.0)
     boss_u = [W / 2 - 30.0, W / 2 + 30.0]
     for bu in boss_u:
         shell = shell.union(face_cyl(bu, boss_v, -(FACE_THK + BOSS_H), -FACE_THK + 0.01, BOSS_D))
         shell = shell.difference(face_cyl(bu, boss_v, -(FACE_THK + BOSS_H) - 0.01, -1.0, BOSS_HOLE))
 
-    # ---- vier hoekklossen voor de grondplaat
-    # Een blok in de hoek, doorsneden met de binnenholte: zo sluit de klos
-    # vanzelf aan op beide wanden en op het schuine vlak, en print hij mee
-    # omhoog zonder support.
+    # ---- four corner bosses for the base plate
+    # A block in the corner, intersected with the inner cavity: that way the boss
+    # meets both walls and the sloping surface by itself, and it prints along
+    # upwards without support.
     r_plan = max(R_CORNER - WALL, 0.8)
     open_poly = Polygon([(WALL, WALL), (W - WALL, WALL),
                          (W - WALL, D - WALL), (WALL, D - WALL)])
@@ -291,47 +290,47 @@ def build(naam, a_deg, back_tilt, margin_top, max_h):
             (W - WALL - FOOT_IN, WALL + FOOT_IN),
             (WALL + FOOT_IN, C_in - FOOT_BACK),
             (W - WALL - FOOT_IN, C_in - FOOT_BACK)]
-    # Een schaaf die alles wegneemt boven het schuine vlak, 0,6 mm het materiaal
-    # in. De klossen overlappen het vlak daardoor netjes: precies samenvallende
-    # vlakken zijn wat een booleaanse bewerking laat ontsporen.
+    # A plane that removes everything above the sloping surface, biting 0.6 mm
+    # into the material. The bosses therefore overlap the surface cleanly:
+    # exactly coincident faces are what derails a boolean operation.
     klip = face_box(-200.0, 400.0, -200.0, 400.0, -300.0, -(FACE_THK - 0.6))
 
     for (fx, fy) in feet:
         klos = trimesh.creation.box(extents=[FOOT_SZ, FOOT_SZ, H + 60])
         klos.apply_translation([fx, fy, PLATE_T + (H + 60) / 2])
         shell = shell.union(klos.intersection(klip))
-        # voorgat, maar niet door het schuine vlak heen
+        # pilot hole, but not through the sloping surface
         top = min(z_inner(fy) - 1.2, PLATE_T + 11.0)
         gat = trimesh.creation.cylinder(radius=FOOT_HOLE / 2, height=top - PLATE_T + 1.0,
                                         sections=32)
         gat.apply_translation([fx, fy, (top + PLATE_T - 1.0) / 2])
         shell = shell.difference(gat)
 
-    # Geen slotintersectie met de buitenvorm meer: die twee lichamen delen hun
-    # hele buitenhuid en dat is precies het samenvallende geval waar een
-    # booleaanse bewerking op stukloopt. Alles is nu zo gebouwd dat het binnen
-    # de buitenvorm blijft; onderstaande controle bewaakt dat.
-    # Nog een keer door de booleaanse motor met een blokje diep in de voorwand:
-    # dat kost niets aan vorm, maar levert wel een schone, gesloten mesh op.
-    # Zonder deze stap blijven er een paar flinterdunne driehoekjes staan die na
-    # het exporteren als open randen terugkomen.
+    # No final intersection with the outer shape any more: those two bodies share
+    # their entire outer skin, and that is exactly the coincident case a boolean
+    # operation breaks on. Everything is now built to stay inside the outer shape;
+    # the check below enforces that.
+    # One more pass through the boolean engine with a small block deep in the front
+    # wall: that costs nothing in shape, but yields a clean, closed mesh.
+    # Without this step a few paper-thin triangles remain, which come back as open
+    # edges after exporting.
     kern = trimesh.creation.box(extents=[1.0, 1.0, 1.0])
     kern.apply_translation([W / 2, WALL / 2, FRONT_H / 2])
     try:
         shell = shell.union(kern)
     except Exception as e:
-        print("   (opschonen overgeslagen: %s)" % e)
+        print("   (cleanup skipped: %s)" % e)
 
     shell = finish(shell)
     ob = outer.bounds
     sb = shell.bounds
     if (sb[0] < ob[0] - 0.01).any() or (sb[1] > ob[1] + 0.01).any():
-        print("   LET OP: er steekt iets buiten de buitenvorm  %s vs %s"
+        print("   NOTE: something pokes outside the outer shape  %s vs %s"
               % (np.round(sb, 2).tolist(), np.round(ob, 2).tolist()))
     export_solid(shell, "%s-shell.stl" % naam)
 
-    # Draaien voor de printplaat introduceert weer afrondverschillen, dus daarna
-    # nog een keer door de booleaanse motor en pas dan exporteren.
+    # Rotating for the print bed introduces rounding differences again, so run it
+    # through the boolean engine once more and only then export.
     pr = shell.copy()
     Rp = np.eye(4); Rp[:3, :3] = np.array([[1, 0, 0], [0, COS, SIN], [0, -SIN, COS]])
     pr.apply_transform(Rp); pr.apply_translation([0, 0, -pr.bounds[0][2]])
@@ -344,7 +343,7 @@ def build(naam, a_deg, back_tilt, margin_top, max_h):
     pr = finish(pr)
     export_solid(pr, "%s-shell-print.stl" % naam)
 
-    # ---- klembalkje
+    # ---- clamp bar
     BR_L, BR_W, BR_T = (boss_u[1] - boss_u[0]) + 14.0, 13.0, 3.6
     PAD_W, PAD_L = 3.0, 44.0
     PAD_H = FACE_THK + BOSS_H - (BEZEL + PCB_THK)
@@ -362,7 +361,7 @@ def build(naam, a_deg, back_tilt, margin_top, max_h):
     brace = finish(brace)
     export_solid(brace, "%s-brace.stl" % naam)
 
-    # ---- grondplaat
+    # ---- base plate
     plate_poly = open_poly.buffer(-PLATE_CLR, join_style=1)
     plate = trimesh.creation.extrude_polygon(plate_poly, height=PLATE_T)
     for (fx, fy) in feet:
@@ -370,12 +369,12 @@ def build(naam, a_deg, back_tilt, margin_top, max_h):
         door.apply_translation([fx, fy, PLATE_T / 2])
         plate = plate.difference(door)
         cb = trimesh.creation.cylinder(radius=PLATE_CB_D / 2, height=PLATE_CB_T * 2, sections=40)
-        cb.apply_translation([fx, fy, 0.0])          # verzinking aan de onderkant
+        cb.apply_translation([fx, fy, 0.0])          # countersink on the underside
         plate = plate.difference(cb)
     plate = finish(plate)
     export_solid(plate, "%s-bodem.stl" % naam)
 
-    print("   shell watertight=%s volume=%.0f mm3 | brace %s | bodem %s (%.1f x %.1f x %.1f mm)"
+    print("   shell watertight=%s volume=%.0f mm3 | brace %s | base %s (%.1f x %.1f x %.1f mm)"
           % (shell.is_watertight, shell.volume, brace.is_watertight, plate.is_watertight,
              plate.extents[0], plate.extents[1], plate.extents[2]))
     return shell

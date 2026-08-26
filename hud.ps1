@@ -438,46 +438,50 @@ function Show-DashAbout {
     $lblDisp = Label (T 'about.checking') 120 182 280 $f.Font $C.Muted
 
 
-    $btnUpd = New-Object System.Windows.Forms.Button
-    $btnUpd.Text = (T 'about.update')
-    $btnUpd.Location = New-Object System.Drawing.Point 20, 232
-    $btnUpd.Size = New-Object System.Drawing.Size 110, 30
-    $btnUpd.Enabled = $false
-    $btnUpd.FlatStyle = 'Flat'
-    $btnUpd.BackColor = $C.Row; $btnUpd.ForeColor = $C.Muted
-    $f.Controls.Add($btnUpd)
+    function Knop($txt, $aan, $kleur) {
+        $b = New-Object System.Windows.Forms.Button
+        $b.Text = $txt
+        $b.Enabled = $aan
+        $b.FlatStyle = 'Flat'
+        $b.BackColor = $C.Row; $b.ForeColor = $kleur
+        $f.Controls.Add($b)
+        return $b
+    }
 
-    $btnNew = New-Object System.Windows.Forms.Button
-    $btnNew.Text = (T 'about.whatsNew')
-    $btnNew.Location = New-Object System.Drawing.Point 136, 232
-    $btnNew.Size = New-Object System.Drawing.Size 110, 30
-    $btnNew.Enabled = $false
-    $btnNew.FlatStyle = 'Flat'
-    $btnNew.BackColor = $C.Row; $btnNew.ForeColor = $C.Muted
-    $f.Controls.Add($btnNew)
+    $btnUpd   = Knop (T 'about.update')   $false $C.Muted
+    $btnNew   = Knop (T 'about.whatsNew') $false $C.Muted
+    $btnFlash = Knop (T 'about.flash')    $true  $C.Text
+    $btnClose = Knop (T 'about.close')    $true  $C.Text
 
-    $btnFlash = New-Object System.Windows.Forms.Button
-    $btnFlash.Text = (T 'about.flash')
-    $btnFlash.Location = New-Object System.Drawing.Point 252, 232
-    $btnFlash.Size = New-Object System.Drawing.Size 130, 30
-    $btnFlash.FlatStyle = 'Flat'
-    $btnFlash.BackColor = $C.Row; $btnFlash.ForeColor = $C.Text
     <#
-      Always available, not only when the firmware is behind: sometimes you
-      just want to reflash, and the useful part of this button is that it
-      frees the COM port first -- which is the step people forget.
+      Measured and laid out left to right, rather than placed on pixels worked
+      out once by hand. These labels come from langlib, so their width is a
+      property of the language: "Flash the display" is wider than "Schermpje
+      flashen", and a row that fits in one language puts the close button
+      halfway underneath its neighbour in the next -- which is exactly what it
+      did. The form widens if the row needs it.
+    #>
+    $x = 20
+    foreach ($b in @($btnUpd, $btnNew, $btnFlash, $btnClose)) {
+        $w = [System.Windows.Forms.TextRenderer]::MeasureText($b.Text, $b.Font).Width + 26
+        if ($w -lt 90) { $w = 90 }
+        $b.Size = New-Object System.Drawing.Size $w, 30
+        $b.Location = New-Object System.Drawing.Point $x, 232
+        $x += $w + 6
+    }
+    $nodig = $x - 6 + 20                      # the last gap is not a gap, plus the right margin
+    if ($nodig -gt $f.ClientSize.Width) {
+        $f.ClientSize = New-Object System.Drawing.Size $nodig, $f.ClientSize.Height
+    }
+
+    <#
+      Flashing is always on offer, not only when the firmware is behind:
+      sometimes you just want to reflash, and the useful part of this button is
+      that it frees the COM port first -- which is the step people forget.
     #>
     $btnFlash.Add_Click({ Open-DashFlasher $ApiPort })
-    $f.Controls.Add($btnFlash)
-
-    $btnClose = New-Object System.Windows.Forms.Button
-    $btnClose.Text = (T 'about.close')
-    $btnClose.Location = New-Object System.Drawing.Point 330, 232
-    $btnClose.Size = New-Object System.Drawing.Size 90, 30
-    $btnClose.FlatStyle = 'Flat'
-    $btnClose.BackColor = $C.Row; $btnClose.ForeColor = $C.Text
     $btnClose.Add_Click({ $f.Close() })
-    $f.Controls.Add($btnClose)
+    $f.CancelButton = $btnClose
 
     $link = New-Object System.Windows.Forms.LinkLabel
     $link.Text = (T 'about.repo')

@@ -47,20 +47,35 @@
 
 // ---- touch wiring -----------------------------------------------------------
 /* The AXS15231B handles the touch glass too, on its own fixed I2C pins, so
-   there is nothing external to wire. We poll it instead of using the INT line:
-   the sketch asks "is a finger down right now" in two different places (a tap,
-   and holding the top bar), and an edge-triggered flag cannot answer the second
-   one. One transaction is eight bytes at 400 kHz, cheap enough to do on every
-   pass of the loop. */
+   there is nothing external to wire.
+
+   The INT line decides when to believe the bus. Asked out of the blue this
+   controller does not answer "nothing is happening" -- it answers with whatever
+   it has, and measured on this panel that is a stale point that never changes.
+   Reading only after INT has fallen is the difference between a finger and a
+   leftover. INT is the same discriminator the reference project on this panel
+   uses.
+
+   Which leaves the question that made polling look attractive: the sketch asks
+   "is a finger down right now" while somebody holds the top bar, and an edge is
+   a moment, not a state. A held finger keeps the reports coming, so the state is
+   rebuilt from them -- down until TOUCH_HOLD_MS passes with nothing new. */
 #define TOUCH_SDA   4
 #define TOUCH_SCL   8
+#define TOUCH_INT   3
 #define TOUCH_ADDR  0x3B
+#define TOUCH_HOLD_MS 250
 
 /* Set to 1 if taps land mirrored on real hardware -- which way round the glass
    is fitted is not something you can tell from the datasheet. */
 #define TOUCH_FLIP_X 0
 #define TOUCH_FLIP_Y 0
+/* Prints every reply the controller accepts. Left switchable from the build
+   rather than by editing this file, because the one thing you want when taps
+   land wrong is a build you can make without touching the source. */
+#ifndef GFX_TOUCH_DEBUG
 #define GFX_TOUCH_DEBUG 0
+#endif
 
 static Arduino_DataBus *gQspi =
     new Arduino_ESP32QSPI(QSPI_CS, QSPI_SCK, QSPI_D0, QSPI_D1, QSPI_D2, QSPI_D3);
@@ -163,14 +178,32 @@ static inline void gfxBufPush() { }
 static inline void gfxBufEnd()  { gBufW = gBufH = 0; }
 
 // ---- touch ------------------------------------------------------------------
+/* The handler does nothing but raise a flag: the I2C transaction that follows
+   takes the best part of a millisecond and has no business inside an interrupt. */
+static volatile bool s3TouchIrq = false;
+static void IRAM_ATTR s3TouchIsr() { s3TouchIrq = true; }
+
 static inline void gfxTouchBegin() {
   Wire.begin(TOUCH_SDA, TOUCH_SCL);
   Wire.setClock(400000);
+  pinMode(TOUCH_INT, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(TOUCH_INT), s3TouchIsr, FALLING);
 }
 
 /* One transaction: an eight-byte command asking for the first touch point, and
    an eight-byte reply carrying the point count and its coordinates. Both come
-   back in the panel's native portrait frame. */
+   back in the panel's native portrait frame.
+
+   Believe the reply only when it could be a finger. Measured on the panel: with
+   nobody near the glass this controller answers 0F 0F 0F 0F 0F 0F 0F 0F -- a
+   count of fifteen at (3855, 3855). That is neither of the two values the count
+   was checked against, so it used to be read as a real touch, and mapping those
+   coordinates put it at the top of the screen, held. The screen therefore opened
+   the setup portal on its own a second after every boot, which also silences the
+   cable: the portal loop is the one path that never reads the serial port.
+
+   Hence both tests. A count of one to five is what a five-point controller can
+   truthfully report, and a point has to land on the panel it belongs to. */
 static bool s3TouchRaw(int& px, int& py) {
   static const uint8_t cmd[8] = {0xB5, 0xAB, 0xA5, 0x5A, 0x00, 0x00, 0x00, 0x08};
   uint8_t buf[8];
@@ -179,16 +212,43 @@ static bool s3TouchRaw(int& px, int& py) {
   if (Wire.endTransmission() != 0) return false;
   if (Wire.requestFrom((uint8_t)TOUCH_ADDR, (uint8_t)sizeof(buf)) != sizeof(buf)) return false;
   for (unsigned i = 0; i < sizeof(buf); i++) buf[i] = Wire.read();
-  uint8_t points = buf[1];                       // 0 on release, 0xFF on garbage
-  if (points == 0 || points == 0xFF) return false;
-  px = (int)((((uint16_t)(buf[2] & 0x0F)) << 8) | buf[3]);
-  py = (int)((((uint16_t)(buf[4] & 0x0F)) << 8) | buf[5]);
+  uint8_t points = buf[1];               // 0 on release, anything above 5 is noise
+  if (points < 1 || points > 5) return false;
+  int x = (int)((((uint16_t)(buf[2] & 0x0F)) << 8) | buf[3]);
+  int y = (int)((((uint16_t)(buf[4] & 0x0F)) << 8) | buf[5]);
+  if (x < 0 || x >= PANEL_W || y < 0 || y >= PANEL_H) return false;
+  px = x; py = y;
   return true;
+}
+
+/* The state both callers want: is a finger down, and where. Only an interrupt
+   opens the bus; between interrupts the last point stands for TOUCH_HOLD_MS, so
+   a finger that is being held reads as down for as long as the reports keep
+   arriving, and lifting it reads as up a quarter of a second later. */
+static bool s3TouchNow(int& px, int& py) {
+  static bool     down = false;
+  static uint32_t seen = 0;
+  static int      lastX = 0, lastY = 0;
+
+  if (s3TouchIrq) {
+    s3TouchIrq = false;
+    if (s3TouchRaw(px, py)) {
+      lastX = px; lastY = py; seen = millis(); down = true;
+      return true;
+    }
+    /* INT also fires on release, and that read reports no point. Believe it:
+       it is the earliest and most certain sign the finger is gone. */
+    down = false;
+    return false;
+  }
+  if (down && millis() - seen < TOUCH_HOLD_MS) { px = lastX; py = lastY; return true; }
+  down = false;
+  return false;
 }
 
 static inline bool gfxTouched() {
   int px, py;
-  return s3TouchRaw(px, py);
+  return s3TouchNow(px, py);
 }
 
 /* Native portrait counts into the landscape frame we draw in. The canvas is at
@@ -198,7 +258,7 @@ static inline bool gfxTouched() {
    mirror image and every hit test looks broken. */
 static inline bool gfxTouchPoint(int& sx, int& sy) {
   int px, py;
-  if (!s3TouchRaw(px, py)) return false;
+  if (!s3TouchNow(px, py)) return false;
   sx = py;
   sy = (PANEL_W - 1) - px;
 #if TOUCH_FLIP_X

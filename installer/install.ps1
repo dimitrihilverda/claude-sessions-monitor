@@ -77,7 +77,7 @@ New-Item -ItemType Directory -Force -Path $Doel | Out-Null
 
 $kern = @('sessionlib.ps1', 'focuslib.ps1', 'langlib.ps1', 'beacon.ps1', 'hud.ps1', 'hud.vbs',
           'check-titles.ps1', 'find-title.ps1', 'diagnose.ps1', 'Diagnose.cmd',
-          'uninstall.ps1', 'README-installer.md')
+          'uninstall.ps1', 'README-installer.md', 'updatelib.ps1', 'VERSION')
 $touch = @('session-api.ps1', 'api.vbs', 'actions.json')
 
 foreach ($f in $kern) {

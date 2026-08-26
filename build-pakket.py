@@ -25,6 +25,8 @@ BESTANDEN = [
     ("sessionlib.ps1",           "sessionlib.ps1"),
     ("focuslib.ps1",             "focuslib.ps1"),
     ("langlib.ps1",              "langlib.ps1"),
+    ("updatelib.ps1",            "updatelib.ps1"),
+    ("VERSION",                  "VERSION"),
     ("beacon.ps1",               "beacon.ps1"),
     ("hud.ps1",                  "hud.ps1"),
     ("hud.vbs",                  "hud.vbs"),

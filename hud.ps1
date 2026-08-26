@@ -70,6 +70,7 @@ function Save-Cfg {
 # the same logic.
 . (Join-Path $Root 'focuslib.ps1')
 . (Join-Path $Root 'langlib.ps1')
+. (Join-Path $Root 'updatelib.ps1')
 
 function Show-SessionWindow($sess, [switch]$Explain) {
     $cwd = [string]$sess.cwd
@@ -382,6 +383,163 @@ function Set-TrayIcon([int]$att, [int]$n) {
 }
 Set-TrayIcon 0 0
 
+<#
+  ---- About, and updating from here -----------------------------------------
+
+  Built by hand rather than with a MessageBox because it has to do three things a
+  message box cannot: show two version numbers side by side, act on one of them,
+  and stay usable while a download runs.
+
+  The version check happens on a background runspace. On a hotel network the
+  GitHub call can sit there for ten seconds, and doing that on the UI thread would
+  freeze the whole HUD -- including the session list, which is the one thing that
+  must never stop updating.
+#>
+function Show-DashAbout {
+    $ver = Get-DashVersion $Root
+    $soort = Get-DashInstallKind $Root
+
+    $f = New-Object System.Windows.Forms.Form
+    $f.Text = (T 'about.title')
+    $f.FormBorderStyle = 'FixedDialog'
+    $f.MaximizeBox = $false; $f.MinimizeBox = $false
+    $f.StartPosition = 'CenterScreen'
+    $f.ClientSize = New-Object System.Drawing.Size 420, 250
+    $f.BackColor = $C.Bg
+    $f.ForeColor = $C.Text
+    $f.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+
+    function Label($txt, $x, $y, $w, $font, $kleur) {
+        $l = New-Object System.Windows.Forms.Label
+        $l.Text = $txt; $l.AutoSize = $false
+        $l.Location = New-Object System.Drawing.Point $x, $y
+        $l.Size = New-Object System.Drawing.Size $w, 20
+        $l.Font = $font; $l.ForeColor = $kleur; $l.BackColor = $C.Bg
+        $f.Controls.Add($l)
+        return $l
+    }
+
+    $fTitel = New-Object System.Drawing.Font('Segoe UI Semibold', 13)
+    $fKlein = New-Object System.Drawing.Font('Segoe UI', 8.5)
+
+    [void](Label 'Claude Sessions Monitor' 20 18 300 $fTitel $C.Text)
+    [void](Label (T 'about.by')            20 46 300 $fKlein $C.Green)
+    [void](Label (T 'about.tagline')       20 66 380 $fKlein $C.Muted)
+
+    [void](Label ((T 'about.installed') + ':') 20 104 90 $f.Font $C.Muted)
+    [void](Label ('v' + $ver)                 120 104 120 $f.Font $C.Text)
+    [void](Label ((T 'about.latest') + ':')    20 128 90 $f.Font $C.Muted)
+    $lblLatest = Label (T 'about.checking')   120 128 260 $f.Font $C.Muted
+    [void](Label $(if ($soort -eq 'git') { T 'about.kindGit' } else { T 'about.kindCopy' }) `
+              20 154 380 $fKlein $C.Muted)
+
+    $btnUpd = New-Object System.Windows.Forms.Button
+    $btnUpd.Text = (T 'about.update')
+    $btnUpd.Location = New-Object System.Drawing.Point 20, 192
+    $btnUpd.Size = New-Object System.Drawing.Size 110, 30
+    $btnUpd.Enabled = $false
+    $btnUpd.FlatStyle = 'Flat'
+    $btnUpd.BackColor = $C.Row; $btnUpd.ForeColor = $C.Muted
+    $f.Controls.Add($btnUpd)
+
+    $btnNew = New-Object System.Windows.Forms.Button
+    $btnNew.Text = (T 'about.whatsNew')
+    $btnNew.Location = New-Object System.Drawing.Point 138, 192
+    $btnNew.Size = New-Object System.Drawing.Size 110, 30
+    $btnNew.Enabled = $false
+    $btnNew.FlatStyle = 'Flat'
+    $btnNew.BackColor = $C.Row; $btnNew.ForeColor = $C.Muted
+    $f.Controls.Add($btnNew)
+
+    $btnClose = New-Object System.Windows.Forms.Button
+    $btnClose.Text = (T 'about.close')
+    $btnClose.Location = New-Object System.Drawing.Point 300, 192
+    $btnClose.Size = New-Object System.Drawing.Size 100, 30
+    $btnClose.FlatStyle = 'Flat'
+    $btnClose.BackColor = $C.Row; $btnClose.ForeColor = $C.Text
+    $btnClose.Add_Click({ $f.Close() })
+    $f.Controls.Add($btnClose)
+
+    $link = New-Object System.Windows.Forms.LinkLabel
+    $link.Text = (T 'about.repo')
+    $link.Location = New-Object System.Drawing.Point 20, 228
+    $link.Size = New-Object System.Drawing.Size 200, 18
+    $link.Font = $fKlein
+    $link.LinkColor = $C.Green; $link.BackColor = $C.Bg
+    $link.Add_Click({ try { Start-Process ('https://github.com/' + $DashRepo) } catch { } })
+    $f.Controls.Add($link)
+
+    <#
+      Script scope, not local: this is assigned inside a timer handler and read
+      from two button handlers. A plain $rel would become a local in the handler
+      and the buttons would silently see nothing -- which looks exactly like a
+      network problem, and is not.
+    #>
+    $script:dashRel = $null
+    $ps = [powershell]::Create()
+    [void]$ps.AddScript({
+        param($libPad)
+        . $libPad
+        Get-DashLatestRelease
+    }).AddArgument((Join-Path $Root 'updatelib.ps1'))
+    $handle = $ps.BeginInvoke()
+
+    $wacht = New-Object System.Windows.Forms.Timer
+    $wacht.Interval = 200
+    $wacht.Add_Tick({
+        if (-not $handle.IsCompleted) { return }
+        $wacht.Stop()
+        try { $script:dashRel = @($ps.EndInvoke($handle))[0] } catch { $script:dashRel = $null }
+        try { $ps.Dispose() } catch { }
+
+        if (-not $script:dashRel) {
+            $lblLatest.Text = (T 'about.offline')
+            return
+        }
+        $hier = ConvertTo-DashVersion $ver
+        $nieuwer = ($script:dashRel.Version -gt $hier)
+        $lblLatest.Text = $script:dashRel.Tag + '   ' + $(if ($nieuwer) { T 'about.newer' } else { T 'about.upToDate' })
+        $lblLatest.ForeColor = $(if ($nieuwer) { $C.Orange } else { $C.Green })
+
+        $btnNew.Enabled = $true
+        $btnNew.ForeColor = $C.Text
+        $btnNew.Add_Click({ try { Start-Process $script:dashRel.Page } catch { } })
+
+        if ($nieuwer) {
+            $btnUpd.Enabled = $true
+            $btnUpd.ForeColor = $C.Bg
+            $btnUpd.BackColor = $C.Green
+            $btnUpd.Add_Click({
+                $btnUpd.Enabled = $false
+                $btnUpd.Text = (T 'upd.busy')
+                $f.Refresh()
+                $r = Invoke-DashUpdate -Root $Root -Release $script:dashRel
+                if ($r.Ok) {
+                    [void][System.Windows.Forms.MessageBox]::Show($r.Message, (T 'about.title'), 'OK', 'Information')
+                    $f.Close()
+                    if ($r.Restart) {
+                        # Restart through the same path the menu uses, so there is
+                        # one way this happens rather than two.
+                        $state.restart = $true
+                        Save-Cfg
+                        $tray.Visible = $false
+                        $form.Close()
+                    }
+                } else {
+                    [void][System.Windows.Forms.MessageBox]::Show($r.Message, (T 'about.title'), 'OK', 'Warning')
+                    $btnUpd.Enabled = $true
+                    $btnUpd.Text = (T 'about.update')
+                }
+            })
+        }
+    })
+    $wacht.Start()
+
+    [void]$f.ShowDialog()
+    $wacht.Stop(); $wacht.Dispose()
+    try { $f.Dispose() } catch { }
+}
+
 # ---- menu -------------------------------------------------------------------
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 
@@ -518,6 +676,12 @@ $miStart.Add_Click({
 # Restarting only launches the new HUD after this one has closed (see the
 # bottom of the script). Otherwise two run at once and both write to
 # hud-config.json and sessions.json.
+$miAbout = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.about')
+$miAbout.Add_Click({ Show-DashAbout })
+[void]$menu.Items.Add($miAbout)
+
+[void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+
 $miRestart = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.restart')
 $miRestart.Add_Click({
     $state.restart = $true

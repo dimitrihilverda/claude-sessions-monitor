@@ -27,6 +27,17 @@ jobs:
         with:
           python-version: '3.x'
 
+      - name: VERSION must match the tag
+        # The About box reads VERSION, and the update check compares it to the
+        # latest tag. Let those drift and the HUD tells people they are up to date
+        # when they are not -- so fail the release instead.
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          file="$(tr -d '[:space:]' < VERSION)"
+          echo "tag=$tag  VERSION=$file"
+          test "$tag" = "$file"
+
       - name: Build the package
         run: python build-pakket.py
 

@@ -78,6 +78,7 @@ $prevAge    = [double]::MaxValue
 $prevPid    = 0
 $prevStart  = ''
 $prevTitle  = ''
+$prevAgent  = $false
 $prevHost   = 0
 if (Test-Path $file) {
     try {
@@ -90,6 +91,7 @@ if (Test-Path $file) {
         if ($prev.PSObject.Properties['host_pid'])    { $prevHost  = [int]$prev.host_pid }
         if ($prev.PSObject.Properties['owner_pid'])   { $prevPid   = [int]$prev.owner_pid }
         if ($prev.PSObject.Properties['owner_start']) { $prevStart = [string]$prev.owner_start }
+        if ($prev.PSObject.Properties['owner_agent']) { $prevAgent = [bool]$prev.owner_agent }
     } catch { }
 }
 if (-not $prevState) { $prevState = Get-DashState $prevEvent }
@@ -123,7 +125,7 @@ if (-not $prompt -and $prevPrompt) { $prompt = $prevPrompt }
 # Walking the process tree costs a few CIM calls; if we already know this
 # session's PID we reuse it. A session does not move between processes.
 if ($prevPid -gt 0) {
-    $owner = [pscustomobject]@{ OwnerPid = $prevPid; Start = $prevStart }
+    $owner = [pscustomobject]@{ OwnerPid = $prevPid; Start = $prevStart; Agent = $prevAgent }
 } else {
     $owner = Get-DashOwner
 }
@@ -153,6 +155,7 @@ $status = [ordered]@{
     message     = $msg                 # on Notification: why attention is needed
     owner_pid   = $owner.OwnerPid      # PID of the Claude process
     owner_start = $owner.Start         # start time, against reused PIDs
+    owner_agent = [bool]$owner.Agent   # an editor's AI panel, not a terminal you opened
     host_pid    = $hostPid             # the terminal window; that holds the tab title
     updated     = (Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz')
 }

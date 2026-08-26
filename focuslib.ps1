@@ -139,13 +139,29 @@ function Get-DashProcChain([int]$startPid) {
 }
 
 # Every window with a score > 0, highest first.
+<#
+  Processes whose windows are never a session's window, whatever the score says.
+
+  explorer.exe is the one that mattered: its "Program Manager" window is the
+  desktop itself, and because every parent chain ends at explorer it collected
+  both the chain bonus and the host_pid bonus. For a session whose real window is
+  not in the chain -- see the note about Windows Terminal below -- that made the
+  desktop the top candidate, so clicking a row "worked" and did nothing visible.
+#>
+$DashNeverWindow = @('explorer', 'dwm', 'shellexperiencehost', 'searchhost',
+                     'startmenuexperiencehost', 'textinputhost', 'applicationframehost')
+
+# Titles that say "this is where a shell lives", used only to break a tie.
+$DashTerminalHints = @('terminal', 'console', 'cmd', 'powershell', 'bash', 'wsl')
+
 function Get-DashWindowCandidates {
-    param([string]$Cwd, [int]$OwnerPid = 0, [int]$HostPid = 0)
+    param([string]$Cwd, [int]$OwnerPid = 0, [int]$HostPid = 0, [string]$Title = '')
 
     $leaf = ''
     if ($Cwd) { try { $leaf = Split-Path -Leaf $Cwd } catch { } }
-    $cwdLow  = ([string]$Cwd).ToLower()
-    $leafLow = ([string]$leaf).ToLower()
+    $cwdLow   = ([string]$Cwd).ToLower()
+    $leafLow  = ([string]$leaf).ToLower()
+    $titelLow = ([string]$Title).ToLower().Trim()
 
     # The parent chain starts at the Claude process; if we do not know it, start
     # at the window the beacon recorded.
@@ -158,14 +174,40 @@ function Get-DashWindowCandidates {
         foreach ($w in [Dash.Win]::TopLevel()) {
             $pn = ''
             try { $pn = (Get-Process -Id $w.Pid -ErrorAction Stop).ProcessName.ToLower() } catch { continue }
+            if ($DashNeverWindow -contains $pn) { continue }
             $t = $w.Title.ToLower()
 
             $score = 0
             if ($HostPid -gt 0 -and $w.Pid -eq $HostPid) { $score += 120 }  # the window from the beacon
             if ($chain -contains $w.Pid)                 { $score += 100 }  # belongs to this session
+
+            <#
+              The session's own title in the window title. This is the signal that
+              finds Windows Terminal, and it is the only one that can: Terminal
+              hosts its shells through a pseudoconsole, so the window process is
+              never an ancestor of the shell and the parent chain simply cannot
+              reach it. Claude Code does set the tab title, and Terminal puts the
+              active tab in the window title -- so the text is there to be matched.
+
+              Long titles only. A short one like "mios" is a folder name that turns
+              up in half the windows on screen, and it already scores through the
+              leaf match below.
+            #>
+            if ($titelLow.Length -ge 8 -and $t.Contains($titelLow)) { $score += 90 }
+
             if     ($cwdLow  -and $t.Contains($cwdLow))  { $score += 45  }  # full path in the title
             elseif ($leafLow -and $t.Contains($leafLow)) { $score += 30  }  # project name in the title
             if ($DashHostProcs -contains $pn)            { $score += 10  }  # looks like an IDE or terminal
+
+            <#
+              A nudge, not a decision. Two windows of the same IDE tied exactly --
+              the editor and a detached terminal -- and Sort-Object then picked
+              whichever came first, so the same session opened a different window
+              on different clicks. A session runs in a shell, so on a tie the
+              window that looks like one wins.
+            #>
+            foreach ($h in $DashTerminalHints) { if ($t.Contains($h)) { $score += 5; break } }
+
             if ($score -le 0) { continue }
 
             $out += [pscustomobject]@{
@@ -175,12 +217,14 @@ function Get-DashWindowCandidates {
         }
     } catch { }
 
-    return ($out | Sort-Object Score -Descending)
+    # Handle as the second key: equal scores must always give the same answer, or
+    # the same row opens a different window each time you press it.
+    return ($out | Sort-Object @{E='Score';D=$true}, @{E={[int64]$_.Handle};D=$false})
 }
 
 function Get-DashBestWindow {
-    param([string]$Cwd, [int]$OwnerPid = 0, [int]$HostPid = 0, [int]$MinScore = 30)
-    $c = @(Get-DashWindowCandidates -Cwd $Cwd -OwnerPid $OwnerPid -HostPid $HostPid)
+    param([string]$Cwd, [int]$OwnerPid = 0, [int]$HostPid = 0, [int]$MinScore = 30, [string]$Title = '')
+    $c = @(Get-DashWindowCandidates -Cwd $Cwd -OwnerPid $OwnerPid -HostPid $HostPid -Title $Title)
     if ($c.Count -and $c[0].Score -ge $MinScore) { return $c[0] }
     return $null
 }
@@ -348,7 +392,10 @@ function Invoke-DashSessionFocus {
 
     $hostPid = 0
     if ($Session.PSObject.Properties['host_pid'] -and $Session.host_pid) { $hostPid = [int]$Session.host_pid }
-    $best = Get-DashBestWindow -Cwd ([string]$Session.cwd) -OwnerPid ([int]$Session.owner_pid) -HostPid $hostPid
+    $titel = ''
+    if ($Session.PSObject.Properties['title'] -and $Session.title) { $titel = [string]$Session.title }
+    elseif ($Session.PSObject.Properties['name'] -and $Session.name) { $titel = [string]$Session.name }
+    $best = Get-DashBestWindow -Cwd ([string]$Session.cwd) -OwnerPid ([int]$Session.owner_pid) -HostPid $hostPid -Title $titel
     if ($best) {
         # Niet weggooien wat we net hebben uitgezocht: Show-DashWindow weet of het
         # venster echt naar voren kwam, en zonder die uitkomst meldt de API "ok"

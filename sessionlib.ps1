@@ -85,11 +85,21 @@ function Get-DashOwner {
         if ([string]$par.Name -match '^(node|claude)\.exe$') {
             $start = ''
             try { $start = (Get-Process -Id $ppid -ErrorAction Stop).StartTime.ToString('o') } catch { }
-            return [pscustomobject]@{ OwnerPid = $ppid; Start = $start }
+            <#
+              Is this an editor's AI panel rather than a session you opened?
+              PhpStorm and friends run Claude Code through the Agent SDK over ACP,
+              which is a genuine session and fires the same hooks -- but it is not
+              a terminal you are sitting in, and seeing it appear next to your own
+              session in the same folder is baffling until it is labelled.
+              The command line is already on the object we fetched, so this is free.
+            #>
+            $cmd = [string]$par.CommandLine
+            $agent = ($cmd -match 'claude-agent-sdk|claude-agent-acp|acp-agents')
+            return [pscustomobject]@{ OwnerPid = $ppid; Start = $start; Agent = $agent }
         }
         $cur = $ppid
     }
-    return [pscustomobject]@{ OwnerPid = 0; Start = '' }
+    return [pscustomobject]@{ OwnerPid = 0; Start = ''; Agent = $false }
 }
 
 # $true = alive, $false = gone, $null = unknown (old beacon without a PID)
@@ -144,13 +154,23 @@ function Get-DashDesktopPid {
     return 0
 }
 
-# first ancestor with a real window; that goes into the beacon file
+<#
+  First ancestor with a real window; that goes into the beacon file.
+
+  Not explorer, though. Every chain ends at the shell, and explorer always has a
+  window -- the desktop, titled "Program Manager". Recording that as the session's
+  window meant clicking a row raised the desktop: no error, no visible effect, and
+  nothing to suggest where to look. A session's window is never the desktop.
+#>
+$DashNeverHost = @('explorer', 'dwm')
+
 function Get-DashHostPid([int]$fromPid) {
     $id = $fromPid
     for ($i = 0; $i -lt 8 -and $id -gt 4; $i++) {
         try {
             $p = Get-Process -Id $id -ErrorAction Stop
-            if ($p.MainWindowHandle -ne [IntPtr]::Zero) { return $id }
+            if ($p.MainWindowHandle -ne [IntPtr]::Zero -and
+                ($DashNeverHost -notcontains $p.ProcessName.ToLower())) { return $id }
         } catch { }
         $ci = Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue
         if (-not $ci) { break }
@@ -418,6 +438,12 @@ function Get-DashSessions {
             # take from it. Do make clear it is not a terminal session.
             if (-not $x.title) { $x.name = 'Cowork · ' + $x.folder }
         }
+    }
+
+    # Same idea for an editor's AI panel: without this it shows up as the bare
+    # folder name, right next to your own session in that folder.
+    if ($x.PSObject.Properties['owner_agent'] -and $x.owner_agent -and -not $x.title) {
+        $x.name = 'Agent · ' + $x.folder
     }
 
     # Two sessions with the same name (for instance the same folder twice, with no

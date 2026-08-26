@@ -514,10 +514,15 @@ $script:serCh340     = ''
   By chip, never by number: this same board turned up as COM12 and later as
   COM16 on this machine, so a fixed name breaks the moment you replug it.
 
-  On Windows that means a PnP query for the CH340's vendor ID, and that query
-  costs about a second -- far too slow to run in the service loop. GetPortNames()
-  costs 10 ms, so that is the gate: only when the set of ports actually changes
-  do we pay for the lookup.
+  On Windows that means a PnP query for the vendor ID, and that query costs about
+  a second -- far too slow to run in the service loop. GetPortNames() costs 10 ms,
+  so that is the gate: only when the set of ports actually changes do we pay for
+  the lookup.
+
+  Two vendors, because there are two boards: 1A86 is the CH340 in front of the
+  CYD, 303A is Espressif's own, which the S3 speaks directly over its native USB.
+  The CYD comes first when both are plugged in, so a machine that has been
+  driving one all along keeps driving it.
 
   On macOS there is nothing to look up. The device name already says what it is
   (cu.usbserial for the CH340, cu.usbmodem for the S3's native USB), so the
@@ -539,10 +544,14 @@ function Find-DashSerialPort {
 
     try {
         $d = @(Get-CimInstance Win32_PnPEntity -ErrorAction Stop |
-               Where-Object { $_.PNPDeviceID -match 'VID_1A86' -and $_.Name -match 'COM\d+' })
-        foreach ($x in $d) {
-            $m = [regex]::Match($x.Name, 'COM\d+')
-            if ($m.Success) { $script:serCh340 = $m.Value; break }
+               Where-Object { $_.PNPDeviceID -match 'VID_(1A86|303A)' -and $_.Name -match 'COM\d+' })
+        foreach ($vid in @('VID_1A86', 'VID_303A')) {
+            foreach ($x in $d) {
+                if ($x.PNPDeviceID -notmatch $vid) { continue }
+                $m = [regex]::Match($x.Name, 'COM\d+')
+                if ($m.Success) { $script:serCh340 = $m.Value; break }
+            }
+            if ($script:serCh340) { break }
         }
     } catch { }
     return $script:serCh340

@@ -150,16 +150,43 @@ XPT2046_Touchscreen ts(TP_CS, TP_IRQ);
 #define HDR_H     28
 #define ROW_Y     30
 #define ROW_H     41
-#define MAX_ROWS   4
+#define MAX_ROWS   4      // rows that fit on screen at once
+/* How many sessions we keep in memory. The PC sends every visible one, and the
+   old code threw away everything past the fourth -- so with five sessions the
+   fifth did not exist as far as the display was concerned. Keeping more costs a
+   little RAM and buys scrolling. */
+#define MAX_SESS  16
 #define BAR_Y    196
 #define BAR_H     44
 
 // ---- session state ---------------------------------------------------------
 struct Sess { String state, name, since, why, id; };
-Sess     rows[MAX_ROWS];
+Sess     rows[MAX_SESS];
 int      nRows = 0;
 int      nAtt = 0, nAct = 0, nDone = 0;
 int      selIdx = 0;
+/* Index of the row drawn in the top slot. Everything else derives from this, so
+   there is one number to keep honest rather than a scroll state per view. */
+int      scrollTop = 0;
+
+bool scrollable() { return nRows > MAX_ROWS; }
+int  scrollMax()  { return scrollable() ? (nRows - MAX_ROWS) : 0; }
+
+void clampScroll() {
+  if (scrollTop > scrollMax()) scrollTop = scrollMax();
+  if (scrollTop < 0) scrollTop = 0;
+}
+
+/* Keep a row in view. Used for the selection and, more importantly, for a
+   session that starts asking for attention: an orange alarm below the fold makes
+   the whole display untrustworthy, because "nothing on screen" would no longer
+   mean "nothing wants you". */
+void scrollToRow(int idx) {
+  if (idx < 0 || idx >= nRows) return;
+  if (idx < scrollTop)                 scrollTop = idx;
+  else if (idx >= scrollTop + MAX_ROWS) scrollTop = idx - MAX_ROWS + 1;
+  clampScroll();
+}
 String   clockTxt = "--:--";
 String   btnLabel[3] = { "Button 1", "Button 2", "Button 3" };
 
@@ -325,14 +352,18 @@ void drawHeader() {
   tft.drawFastHLine(0, HDR_H, 320, COL_LINE);
 }
 
+/* i is the slot on screen, not the session. With scrolling those stopped being
+   the same thing, and mixing them up is how you end up acting on the wrong
+   session -- so the translation happens once, here. */
 void drawRow(int i) {
   int y = ROW_Y + i * ROW_H;
+  int r = scrollTop + i;
   row.createSprite(320, ROW_H - 3);
   row.fillSprite(COL_BG);
 
-  if (i < nRows) {
-    bool sel = (i == selIdx);
-    uint16_t c = stateColor(rows[i].state);
+  if (r < nRows) {
+    bool sel = (r == selIdx);
+    uint16_t c = stateColor(rows[r].state);
     /* The stripe on the left says WHAT the session is doing, the lighter surface
        says which row is selected -- two separate signals, no extra outline. */
     row.fillRoundRect(6, 0, 308, ROW_H - 3, 6, sel ? COL_SEL : COL_ROW);
@@ -340,7 +371,7 @@ void drawRow(int i) {
 
     // Short names large, longer titles a size smaller: since the beacon started
     // sending the real session title, those names are much longer than a folder name.
-    String nm = rows[i].name;
+    String nm = rows[r].name;
     row.setTextColor(COL_TXT, sel ? COL_SEL : COL_ROW);
     if (nm.length() <= 16) {
       row.setTextFont(4);
@@ -357,7 +388,7 @@ void drawRow(int i) {
     uint16_t rowBg = sel ? COL_SEL : COL_ROW;
     uint16_t chipBg = blend565(c, rowBg, 38);
     row.setTextFont(2);
-    String lbl = stateLabel(rows[i].state);
+    String lbl = stateLabel(rows[r].state);
     int cw = row.textWidth(lbl) + 14, ch = 17;
     int cx = 306 - cw, cy = 3;
     row.fillRoundRect(cx, cy, cw, ch, 4, chipBg);
@@ -368,10 +399,10 @@ void drawRow(int i) {
     row.setTextDatum(TL_DATUM);
 
     row.setTextColor(COL_MUTED, sel ? COL_SEL : COL_ROW);
-    String w = rows[i].since + "  " + rows[i].why;
+    String w = rows[r].since + "  " + rows[r].why;
     if (w.length() > 52) w = w.substring(0, 51) + ".";
     row.drawString(w, 16, 23);
-  } else if (i == 0) {
+  } else if (r == 0) {
     row.setTextFont(2);
     row.setTextColor(COL_MUTED, COL_BG);
     if (online) {
@@ -385,10 +416,25 @@ void drawRow(int i) {
       row.setTextColor(COL_MUTED, COL_BG);
       row.drawString(TXT_CHECKAPI, 16, 21);
     }
-  } else if (i == 1 && !online && !nRows) {
+  } else if (r == 1 && !online && !nRows) {
     row.setTextFont(2);
     row.setTextColor(COL_MUTED, COL_BG);
     row.drawString(TXT_HOLDSETUP, 16, 10);
+  }
+
+  /* A hairline on the right edge showing where you are. Three pixels wide, but it
+     answers the one question the screen could not: is there anything below? */
+  if (scrollable()) {
+    int hoog = (MAX_ROWS * ROW_H) - 6;
+    int dik  = (hoog * MAX_ROWS) / nRows;
+    if (dik < 8) dik = 8;
+    int top  = (scrollMax() > 0) ? ((hoog - dik) * scrollTop) / scrollMax() : 0;
+    int mijn = y - ROW_Y;                       // where this slot sits in the list
+    row.fillRect(316, 0, 3, ROW_H - 3, COL_ROW);
+    for (int k = 0; k < ROW_H - 3; k++) {
+      int abs = mijn + k;
+      if (abs >= top && abs < top + dik) row.drawFastHLine(316, k, 3, COL_MUTED);
+    }
   }
 
   row.pushSprite(0, y);
@@ -405,13 +451,51 @@ void btnRect(int i, int& x, int& w) {
   x = 6 + i * (w + 4);
 }
 
+/* The third slot doubles as the scroll control once there are more sessions than
+   rows. Returns 0..2 for a button, or HIT_UP / HIT_DOWN for the arrows. */
+#define HIT_NONE -1
+#define HIT_UP   -2
+#define HIT_DOWN -3
+
 int btnHit(int x) {
   for (int i = 0; i < 3; i++) {
     int bx, bw;
     btnRect(i, bx, bw);
-    if (x >= bx && x < bx + bw) return i;
+    if (x < bx || x >= bx + bw) continue;
+    if (i == 2 && scrollable()) {
+      // left half up, right half down -- reading order, and it matches the
+      // triangles drawn in those halves
+      return (x < bx + bw / 2) ? HIT_UP : HIT_DOWN;
+    }
+    return i;
   }
-  return -1;
+  return HIT_NONE;
+}
+
+/* The two arrows, drawn in the third slot instead of a label. Triangles rather
+   than a font glyph: no font here has a usable arrow, and two filled triangles
+   read better at this size than any character would. */
+void drawArrows(bool flashUp, bool flashDown) {
+  int x, w;
+  btnRect(2, x, w);
+  int h = BAR_H - 6, half = w / 2;
+
+  for (int k = 0; k < 2; k++) {
+    bool aan = k ? flashDown : flashUp;
+    int  bx  = x + k * half;
+    uint16_t vlak = aan ? COL_GREEN : COL_ROW;
+    uint16_t ink  = aan ? COL_BG : (scrollable() ? COL_TXT : COL_MUTED);
+    tft.fillRoundRect(bx + 1, BAR_Y, half - 2, h, 6, vlak);
+    tft.drawRoundRect(bx + 1, BAR_Y, half - 2, h, 6, aan ? COL_GREEN : COL_LINE);
+
+    // grey out the end of the road, so you can see there is nothing further
+    if (k == 0 && scrollTop <= 0)           ink = COL_LINE;
+    if (k == 1 && scrollTop >= scrollMax()) ink = COL_LINE;
+
+    int cx = bx + half / 2, cy = BAR_Y + h / 2, s = 6;
+    if (k == 0) tft.fillTriangle(cx, cy - s, cx - s, cy + s, cx + s, cy + s, ink);
+    else        tft.fillTriangle(cx, cy + s, cx - s, cy - s, cx + s, cy - s, ink);
+  }
 }
 
 void drawButton(int i, bool pressed) {
@@ -432,9 +516,28 @@ void drawButton(int i, bool pressed) {
   tft.setTextDatum(TL_DATUM);
 }
 
+void scrollBy(int delta, bool wrap) {
+  if (!scrollable()) return;
+  int v = scrollTop + delta;
+  if (wrap) {
+    if (v > scrollMax()) v = 0;
+    else if (v < 0)      v = scrollMax();
+  }
+  scrollTop = v;
+  clampScroll();
+  fingerprint = "";        // force a repaint: every row moved
+  drawAll();
+}
+
 // Light up button i. loop() does the redraw, so no delay() is needed in touch
 // or button handling and polling simply carries on.
 void flashButton(int i) {
+  if (i == HIT_UP || i == HIT_DOWN) {
+    btnFlash = i;
+    btnFlashUntil = millis() + 180;
+    drawArrows(i == HIT_UP, i == HIT_DOWN);
+    return;
+  }
   if (i < 0 || i > 2) return;
   btnFlash = i;
   btnFlashUntil = millis() + 180;
@@ -444,7 +547,9 @@ void flashButton(int i) {
 void drawButtonBar() {
   tft.fillRect(0, BAR_Y - 4, 320, 244 - BAR_Y, COL_BG);
   tft.drawFastHLine(0, BAR_Y - 4, 320, COL_LINE);
-  for (int i = 0; i < 3; i++) drawButton(i, i == btnFlash);
+  int n = scrollable() ? 2 : 3;
+  for (int i = 0; i < n; i++) drawButton(i, i == btnFlash);
+  if (scrollable()) drawArrows(btnFlash == HIT_UP, btnFlash == HIT_DOWN);
 }
 
 /* Het levende deel van het offline-scherm. Alleen dit strookje wordt hertekend,
@@ -670,7 +775,7 @@ bool poll() {
   int    n = 0, att = 0, act = 0, done = 0;
   String clk = clockTxt, newAtt = "";
   String labels[3] = { btnLabel[0], btnLabel[1], btnLabel[2] };
-  Sess   tmp[MAX_ROWS];
+  Sess   tmp[MAX_SESS];
 
   int start = 0;
   while (start < (int)body.length()) {
@@ -704,7 +809,7 @@ bool poll() {
       continue;
     }
 
-    if (n >= MAX_ROWS) continue;
+    if (n >= MAX_SESS) continue;
     String f[5];
     splitFields(line, 0, f, 5);
     tmp[n].state = f[0];
@@ -718,7 +823,7 @@ bool poll() {
 
   String fp = String(att) + "/" + act + "/" + done + "#";
   for (int i = 0; i < n; i++) fp += tmp[i].state + tmp[i].name + tmp[i].since + tmp[i].why + ";";
-  fp += "@" + labels[0] + labels[1] + labels[2] + "#" + String(selIdx);
+  fp += "@" + labels[0] + labels[1] + labels[2] + "#" + String(selIdx) + "/" + String(scrollTop);
 
   bool freshAttention = (newAtt.length() > 0 && newAtt != attKey);
 
@@ -738,6 +843,15 @@ bool poll() {
   if (freshAttention) {
     for (int i = 0; i < n; i++) if (rows[i].state == "attention") { selIdx = i; break; }
   }
+
+  /* Bring what matters into view. Sessions can now sit below the fold, and an
+     orange alarm down there would be worse than no alarm at all: you would learn
+     that a quiet screen does not mean nothing wants you. So a fresh attention
+     request scrolls itself in, and otherwise we simply keep the selection
+     visible. */
+  clampScroll();
+  if (freshAttention) scrollToRow(selIdx);
+  else if (selIdx >= 0 && selIdx < nRows) scrollToRow(selIdx);
 
   setLed(att > 0, att > 0 || act > 0, false);   // orange = red+green, green = working
 
@@ -806,7 +920,7 @@ void handleTouch() {
   }
 
   if (y >= ROW_Y && y < ROW_Y + MAX_ROWS * ROW_H) {
-    int i = (y - ROW_Y) / ROW_H;
+    int i = scrollTop + (y - ROW_Y) / ROW_H;   // slot -> session
     if (i < nRows) {
       selIdx = i;
       drawAll();
@@ -816,7 +930,12 @@ void handleTouch() {
   }
   if (y >= BAR_Y) {                             // tapped on a button
     int i = btnHit(x);
-    if (i < 0) return;                          // in the gap between two buttons
+    if (i == HIT_NONE) return;                  // in the gap between two buttons
+    if (i == HIT_UP || i == HIT_DOWN) {
+      flashButton(i);
+      scrollBy(i == HIT_UP ? -1 : 1, false);
+      return;
+    }
     flashButton(i);
     char b[2] = { (char)('1' + i), 0 };
     sendAction(b);
@@ -845,8 +964,18 @@ void handleButtons() {
 
     if (down && !btnWas[i] && millis() - btnAt[i] > 250) {
       btnAt[i] = millis();
-      flashButton(i);          // buttons 1-3 have an on-screen surface; the BOOT button does not
-      sendAction(BUTTONS[i].id);
+      /* While the arrows are showing, the third button scrolls instead. Otherwise
+         it would still snooze while the label next to it shows an arrow, and a
+         button that does something other than what it says is worse than a button
+         that does less. Down with a wrap to the top: one button, so one
+         direction, and paging round is the natural reading of that. */
+      if (i == 2 && scrollable()) {
+        flashButton(HIT_DOWN);
+        scrollBy(1, true);
+      } else {
+        flashButton(i);        // buttons 1-3 have an on-screen surface; the BOOT button does not
+        sendAction(BUTTONS[i].id);
+      }
     }
     btnWas[i] = down;
   }
@@ -1400,8 +1529,9 @@ void loop() {
   // let a lit button go out again
   if (btnFlashUntil && millis() > btnFlashUntil) {
     int i = btnFlash;
-    btnFlashUntil = 0; btnFlash = -1;
-    if (i >= 0) drawButton(i, false);
+    btnFlashUntil = 0; btnFlash = HIT_NONE;
+    if (i == HIT_UP || i == HIT_DOWN) drawArrows(false, false);
+    else if (i >= 0)                  drawButton(i, false);
   }
 
   // clear the header line when a message has expired

@@ -314,6 +314,13 @@ void drawHeader() {
   tft.setTextDatum(TR_DATUM);
   String right = (millis() < toastUntil) ? toast : clockTxt;
   tft.drawString(right, 310, 5);
+  /* Say which pipe the data came in over. Without it "it works" and "it works
+     over the cable" look identical, and that is exactly what you want to know
+     when the network is the thing you are unsure about. */
+  if (serialFresh()) {
+    tft.setTextColor(alarm ? COL_BG : COL_GREEN, bg);
+    tft.drawString("USB", 310 - tft.textWidth(right) - 10, 5);
+  }
   tft.setTextDatum(TL_DATUM);
   tft.drawFastHLine(0, HDR_H, 320, COL_LINE);
 }
@@ -488,6 +495,78 @@ void flashAttention() {
   drawHeader();
 }
 
+/* ---- the USB transport -----------------------------------------------------
+   The PC can push the very same payload over the USB cable that it serves on
+   /cyd.txt. That matters on a network where port 8787 is blocked -- an office
+   firewall -- while the display is hanging off the laptop by a cable anyway.
+
+   The PC pushes; we do not ask. Whatever arrived last is kept, and while it is
+   fresh it wins over Wi-Fi. So there is no handshake and nothing ever blocks
+   waiting for a peer that is not there: put this on a USB charger with no PC and
+   nothing arrives, FRESH expires, and it goes back to Wi-Fi by itself.
+
+   Everything the PC sends is framed, because this same serial port carries our
+   own debug output. Ours to the PC start with @ for the same reason. */
+const uint32_t SERIAL_FRESH_MS = 10000;
+
+String   serPayload   = "";     // last complete block from the PC
+uint32_t serAt        = 0;      // when it arrived (0 = never)
+String   serReply     = "";     // last @REPLY
+bool     serHaveReply = false;
+String   serLine      = "";     // line being assembled
+String   serBlock     = "";
+bool     serInBlock   = false;
+
+bool serialFresh() { return serAt && (millis() - serAt < SERIAL_FRESH_MS); }
+
+// Read whatever has arrived. Never blocks, so it is safe to call from anywhere.
+void serialPump() {
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == '\r') continue;
+    if (c != '\n') {
+      if (serLine.length() < 400) serLine += c;   // a runaway line cannot grow forever
+      continue;
+    }
+    String l = serLine;
+    serLine = "";
+    l.trim();
+
+    if (l == "<<<CYD") { serInBlock = true; serBlock = ""; }
+    else if (l == ">>>") {
+      if (serInBlock && serBlock.length()) {
+        // Announce the first block, and any return after a gap. Without this the
+        // cable is a black box: you cannot tell "not receiving" from "receiving
+        // and ignoring", which are very different problems.
+        if (!serialFresh()) Serial.printf("serial: payload received (%u bytes)\n", (unsigned)serBlock.length());
+        serPayload = serBlock;
+        serAt = millis();
+      }
+      serInBlock = false;
+    }
+    else if (serInBlock) {
+      if (serBlock.length() < 2048) { serBlock += l; serBlock += "\n"; }
+    }
+    else if (l.startsWith("@REPLY ")) { serReply = l.substring(7); serHaveReply = true; }
+  }
+}
+
+/* Ask the PC something and wait briefly for its answer. Only used on a tap or a
+   button press, so a short block is acceptable -- and 1500 ms is generous: the
+   PC answers in milliseconds unless it is busy raising a window. */
+String serialAsk(const String& cmd) {
+  serHaveReply = false;
+  serReply = "";
+  Serial.println(cmd);
+  uint32_t t0 = millis();
+  while (millis() - t0 < 1500) {
+    serialPump();
+    if (serHaveReply) return serReply;
+    delay(5);
+  }
+  return "";
+}
+
 // ---- talking to the PC -----------------------------------------------------
 String httpGet(const String& path) {
   if (WiFi.status() != WL_CONNECTED) {
@@ -497,21 +576,13 @@ String httpGet(const String& path) {
   }
   HTTPClient http;
   String url = String("http://") + cfgHost + ":" + cfgPort + path;
-  /* 4 s, not 2.5. The API builds the session list through WMI process queries,
-     which costs about 1.5 s on a cold cache and more when WMI is slow. At 2.5 s
-     the poll regularly fell over that and the display said "no answer" while
-     nothing was wrong. Do not go higher: a failed poll blocks this loop, and
-     the touchscreen does not respond for that long. */
-  /* 4 s zolang het goed gaat: de API kan er bij een koude cache 1,5 s over doen
-     en die poll wil je niet weggooien. Maar zodra we offline zijn is een lange
-     timeout juist schadelijk -- elke mislukte poging kost dan 4 seconden, en met
-     een haperende wifi sta je zo een minuut in het donker. Offline dus kort
-     wachten en snel opnieuw proberen. */
-  /* Offline korter wachten dan online, maar niet te kort. 1500 ms was een val:
-     als de API er 1,3 s over doet, valt de poll er net over, blijft hij offline
-     en houdt daarmee de korte timeout -- dat houdt zichzelf in stand. 3000 ms
-     zit ruim boven de traagste gemeten respons en halveert nog steeds de tijd
-     die een mislukte poging kost. */
+  /* 4 s while things are going well: the API can take 1.5 s on a cold cache and
+     that poll is worth keeping. Offline a long timeout is actively harmful,
+     because every failed attempt then costs 4 seconds and a flaky link leaves
+     you staring at nothing for a minute. But not too short either: 1500 ms was a
+     trap -- if the API takes 1.3 s the poll just misses, we stay offline and keep
+     the short timeout, which sustains itself. 3000 ms sits clear of the slowest
+     response measured and still halves the cost of a failure. */
   uint16_t tmo = online ? 4000 : 3000;
   http.setConnectTimeout(tmo);
   http.setTimeout(tmo);
@@ -538,9 +609,22 @@ String tokenArg() {
   return (strlen(API_TOKEN) > 0) ? String("&t=") + API_TOKEN : String("");
 }
 
+/* One place that decides which pipe to use. Serial when the PC is pushing,
+   otherwise HTTP -- no token over serial, because a cable plugged into that
+   machine is its own proof of access. */
+String reqFocus(const String& id) {
+  if (serialFresh()) return serialAsk("@FOCUS " + id);
+  return httpGet("/focus?id=" + id + tokenArg());
+}
+
+String reqAction(const String& id, const char* btn) {
+  if (serialFresh()) return serialAsk(String("@ACTION ") + id + " " + btn);
+  return httpGet("/action?id=" + id + "&b=" + btn + tokenArg());
+}
+
 void sendFocus(int idx) {
   if (idx < 0 || idx >= nRows) return;
-  String r = httpGet("/focus?id=" + rows[idx].id + tokenArg());
+  String r = reqFocus(rows[idx].id);
   say(r.length() ? r.substring(0, 40) : String(TXT_NOREPLY));
   drawHeader();
 }
@@ -548,7 +632,7 @@ void sendFocus(int idx) {
 void sendAction(const char* btn) {
   if (nRows == 0) { say(TXT_NOSESS); drawHeader(); return; }
   int idx = (selIdx >= 0 && selIdx < nRows) ? selIdx : 0;
-  String r = httpGet("/action?id=" + rows[idx].id + "&b=" + btn + tokenArg());
+  String r = reqAction(rows[idx].id, btn);
   say(r.length() ? r.substring(0, 40) : String(TXT_NOREPLY));
   drawHeader();
 }
@@ -577,7 +661,10 @@ void splitFields(const String& line, int from, String* f, int n) {
 }
 
 bool poll() {
-  String body = httpGet("/cyd.txt");
+  serialPump();
+  // Serial wins while it is fresh: it is the cheaper and more reliable of the
+  // two, and on a blocked network it is the only one that works at all.
+  String body = serialFresh() ? serPayload : httpGet("/cyd.txt");
   if (!body.length()) return false;
 
   int    n = 0, att = 0, act = 0, done = 0;
@@ -1227,19 +1314,45 @@ void setup() {
 
   leesInstellingen();
 
-  /* Never configured? Then straight to the portal, without first waiting twenty
-     seconds on an empty SSID. */
-  if (!cfgSsid.length()) { startPortaal(); return; }
+  /* Is a PC pushing over the cable? Wait a moment to find out, because the
+     answer changes everything below. Without this check a machine with no usable
+     Wi-Fi -- an office network, or one whose password changed -- would spend
+     twenty seconds failing to connect and then sit in the setup portal, while a
+     cable capable of carrying the whole payload was plugged in the entire time.
+     A little over one push interval is enough to be sure. */
+  tft.setTextFont(2);
+  tft.setTextColor(COL_MUTED, COL_BG);
+  tft.drawString("checking USB...", 12, 82);
+  uint32_t tSer = millis();
+  while (millis() - tSer < 4000 && !serialFresh()) { serialPump(); delay(20); }
 
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(cfgSsid.c_str(), cfgPass.c_str());
-  uint32_t t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) delay(250);
+  if (serialFresh()) {
+    Serial.println("transport: USB (PC is pushing)");
+    /* Still bring Wi-Fi up, without waiting for it: having both means a tap
+       keeps working the moment somebody unplugs the cable. */
+    if (cfgSsid.length()) {
+      WiFi.mode(WIFI_STA);
+      WiFi.begin(cfgSsid.c_str(), cfgPass.c_str());
+    }
+  } else {
+    /* Never configured, and no PC on the cable either? Then the portal is the
+       only way to tell it anything. */
+    if (!cfgSsid.length()) { startPortaal(); return; }
 
-  /* If it fails, the password or the network changed. The portal is then the
-     only way out that needs no USB. */
-  if (WiFi.status() != WL_CONNECTED) { startPortaal(); return; }
-  wifiVerbonden();
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(cfgSsid.c_str(), cfgPass.c_str());
+    uint32_t t0 = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) {
+      serialPump();                      // a PC may still show up while we wait
+      if (serialFresh()) break;
+      delay(250);
+    }
+
+    /* Neither Wi-Fi nor a cable. The password or the network changed, and the
+       portal is the only way out that needs no PC. */
+    if (WiFi.status() != WL_CONNECTED && !serialFresh()) { startPortaal(); return; }
+    if (WiFi.status() == WL_CONNECTED) wifiVerbonden();
+  }
 
   tft.fillScreen(COL_BG);
   drawAll();
@@ -1250,7 +1363,12 @@ void loop() {
      reconnecting. Otherwise bewaakWifi() would pull the AP out from under it. */
   if (portaalActief) { portaalLus(); delay(5); return; }
 
-  bewaakWifi();
+  serialPump();
+
+  /* Skip the Wi-Fi watchdog while the cable is feeding us. It would otherwise
+     keep forcing reconnects to a network that is not there, and each of those
+     costs a delay this loop cannot afford. */
+  if (!serialFresh()) bewaakWifi();
 
   handleTouch();
   handleButtons();

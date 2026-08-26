@@ -1,4 +1,4 @@
-# Claude Sessions Monitor
+﻿# Claude Sessions Monitor
 
 A small window showing which Claude Code sessions are running, what they are
 doing, and which one is waiting for you. Always on top; click a session to jump
@@ -62,6 +62,10 @@ first time — choose private networks. On a phone or tablet you can then browse
 
 Do not remember your PC's address? The HUD's right-click menu shows it, and
 clicking copies it.
+
+If the display is plugged into this PC by USB, the service also pushes the same
+data over the cable — handy on a network that blocks the port. That means it holds
+the COM port, so use the HUD menu's "Release the USB port" before flashing.
 
 For the display itself: build instructions, the Arduino sketch and a printable
 case are in `cyd\` and `case\`. What the three physical buttons do is set in

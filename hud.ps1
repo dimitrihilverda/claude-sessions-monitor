@@ -456,20 +456,39 @@ $miAdres.Add_Click({
 #>
 $miCracktro = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.cracktro')
 $miCracktro.Add_Click({
-    $ip = Get-LanIp
-    if (-not $ip) { return }
+    # Over loopback, not the LAN address: this call is local by definition, and
+    # 127.0.0.1 never meets a firewall rule. On a locked-down office network the
+    # LAN address is exactly the one that gets blocked.
     try {
-        Invoke-WebRequest -Uri "http://$($ip):$ApiPort/demo" -TimeoutSec 4 -UseBasicParsing | Out-Null
+        Invoke-WebRequest -Uri "http://127.0.0.1:$ApiPort/demo" -TimeoutSec 4 -UseBasicParsing | Out-Null
     } catch {
         try { $tray.ShowBalloonTip(3000, (T 'menu.cracktro'), (T 'err.noWindow'), 'Info') } catch { }
     }
 })
 [void]$menu.Items.Add($miCracktro)
 
+<#
+  Hand the COM port back for a minute.
+
+  The web service holds the port to feed the display over USB, which means a
+  flash or a serial monitor fails while it is attached. Rather than making you
+  hunt for who has the port, this asks it to let go -- and it reattaches on its
+  own afterwards, so there is nothing to switch back.
+#>
+$miRelease = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.releasePort')
+$miRelease.Add_Click({
+    try {
+        Invoke-WebRequest -Uri "http://127.0.0.1:$ApiPort/serial/release?sec=60" -TimeoutSec 4 -UseBasicParsing | Out-Null
+        try { $tray.ShowBalloonTip(4000, (T 'menu.released'), (T 'menu.releasedBody'), 'Info') } catch { }
+    } catch { }
+})
+[void]$menu.Items.Add($miRelease)
+
 $miStatus = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.statusPage')
 $miStatus.Add_Click({
     $ip = Get-LanIp
     if ($ip) { try { Start-Process "http://$($ip):$ApiPort/" } catch { } }
+    else     { try { Start-Process "http://127.0.0.1:$ApiPort/" } catch { } }
 })
 [void]$menu.Items.Add($miStatus)
 

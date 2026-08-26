@@ -82,6 +82,35 @@ Rolling out several displays and would rather not configure each one? Fill in
 sketch. Those are starting values only: once anything is stored in NVS, NVS
 wins. Be aware that whatever you put there ends up in your git history.
 
+## 2c. Over USB, when the network will not do
+
+On a network that blocks port 8787 — most offices — or a guest network that keeps
+devices apart, there is nothing for the display to poll. If it is plugged into
+the PC, the cable carries the same data instead.
+
+Nothing to set up. `session-api.ps1` looks for the CH340 by chip rather than by
+port number (this board turned up as COM12 one day and COM16 the next), attaches,
+and pushes the identical `/cyd.txt` payload every three seconds. The display
+prefers whatever arrived over serial while it is less than ten seconds old, so:
+
+- plugged into the PC → it uses the cable, and skips Wi-Fi entirely
+- on a USB charger with no PC → nothing arrives, and it falls back to Wi-Fi
+- no usable Wi-Fi *and* a cable → it goes straight to work instead of sitting in
+  the setup portal, which is what used to happen
+
+Taps and button presses go back over the same cable. The header shows **USB** next
+to the clock when that is the transport, so "it works" and "it works over the
+cable" do not look identical.
+
+**The catch:** a serial port belongs to one program at a time, so while the
+service is attached a flash or a serial monitor will fail. Use the HUD's
+right-click menu → **"Release the USB port"**. It lets go for a minute and picks
+it up again by itself. From a script:
+
+    curl "http://127.0.0.1:8787/serial/release?sec=60"
+
+To keep the service off the port entirely, start it with `-SerialBridge:$false`.
+
 ## 3. When something is wrong
 
 | Symptom | Cause |
@@ -97,6 +126,7 @@ wins. Be aware that whatever you put there ends up in your git history.
 | No beep | The CYD has no speaker on board, only the pads. Solder one to the speaker pads (IO26) or set `BEEP_ENABLED` to false |
 | Taps land next to where you press | Set `TOUCH_DEBUG` to 1, tap the four corners, read the raw values in the serial monitor and fill in `TS_MINX/MAXX/MINY/MAXY`. If everything is mirrored, flip `TOUCH_FLIP_X` / `TOUCH_FLIP_Y` |
 | A button does nothing | Button 3 is on GPIO35, which has no internal pull-up. It needs an external 10k resistor to 3V3; without it the input floats |
+| Flashing fails with "could not open port" | The service is holding it for the USB bridge. HUD menu → "Release the USB port", or start the service with `-SerialBridge:$false` |
 | "only works when that session is waiting" | The action has `requireAttention` in `actions.json` and that session is not asking for anything. That is deliberate: it stops you pushing Enter into a session that is simply working |
 
 ## The endpoints
@@ -107,6 +137,7 @@ wins. Be aware that whatever you put there ends up in your git history.
 | `/focus?id=<session>` | brings that window to the front (tapping) |
 | `/action?id=<session>&b=<1-4>` | runs button action N |
 | `/sessions.json` | the same data as JSON |
+| `/serial/release?sec=60` | let go of the USB port, so you can flash |
 | `/` | small status page; tapping a row there also fetches the window |
 
 `/cyd.txt` returns one line per session as

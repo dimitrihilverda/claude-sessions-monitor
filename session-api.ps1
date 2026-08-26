@@ -11,6 +11,10 @@
 #    GET /focus?id=<sid>       bring that session's window to the front (tapping)
 #    GET /action?id=<sid>&b=N  run button action N (see actions.json)
 #    GET /                     a tiny status page (fine on a phone)
+#    GET /serial/release       let go of the USB port for a minute, to flash
+#
+#  Besides HTTP the same payload goes out over USB serial, so the display keeps
+#  working on a network that blocks the port. See the USB bridge below.
 #
 #  Uses System.Net.Sockets.TcpListener rather than HttpListener: the latter
 #  needs a urlacl reservation when run from a non-elevated prompt.
@@ -37,7 +41,11 @@ param(
     [int]$PayloadMaxAgeSec = 10,
     # Log every incoming request, for when you need to know whether the display
     # is reaching the PC at all.
-    [switch]$LogRequests
+    [switch]$LogRequests,
+    # The USB bridge: same payload over the cable, for a network where 8787 is
+    # blocked. -SerialBridge:$false leaves the COM port alone entirely.
+    [bool]$SerialBridge = $true,
+    [int]$SerialPushMs = 3000
 )
 $ErrorActionPreference = 'Continue'
 
@@ -59,12 +67,6 @@ function Write-DashLog([string]$txt) {
     } catch { }
 }
 
-<#
-  The label shown on a button. An explicit "label" in actions.json always wins;
-  without one we fall back to "labelKey", which points at langlib.ps1 so the
-  buttons follow the Windows display language like everything else. Any
-  "minutes" is passed in, which is what makes "Snooze {0} min" work.
-#>
 <#
   A one-shot command for the display. The display polls; the PC cannot push, so
   a command waits here until the next poll picks it up and is then cleared. That
@@ -91,6 +93,54 @@ function Read-DisplayCommand {
 }
 
 <#
+  One handler for a tap or a button press, whatever it arrived over.
+
+  Both the HTTP endpoints and the USB bridge end up here. Keeping it in one place
+  matters more than it looks: this is where the "only when that session is asking"
+  brake lives, and a second copy of that logic is a second place for it to drift.
+
+  $Via ends up in actions.log, so the log says whether something came in over the
+  network or over the cable.
+#>
+function Invoke-DashTap {
+    param($All, [string]$Sid, [string]$Kind, [string]$Btn = '1', [string]$Via = '')
+
+    $merk = if ($Via) { " ($Via)" } else { '' }
+
+    $sess = $null
+    foreach ($s in ($All | Where-Object { $_.visible })) {
+        if ($s.session_id -eq $Sid) { $sess = $s; break }
+    }
+    # no id sent? then the session that has been waiting longest
+    if (-not $sess) {
+        $sess = @($All | Where-Object { $_.visible -and $_.state -eq 'attention' } | Sort-Object sort_ts)[0]
+    }
+    if (-not $sess) { return (T 'err.noSession') }
+
+    if ($Kind -eq 'focus') {
+        Reset-SessieCache
+        $w = Resolve-DashFocus $sess
+        if ($w.Found -and $w.Raised) {
+            Write-DashLog "TIK$merk -> $($sess.name) : $($w.Title)"
+            return (T 'ok.action' @($sess.name))
+        }
+        if ($w.Found) {
+            # Found, but Windows would not raise it. That is a different thing
+            # from "no window", and the display should see the difference.
+            Write-DashLog "TIK$merk -> $($sess.name) : found but would not come forward ($($w.Title))"
+            return (T 'err.windowNotRaised')
+        }
+        Write-DashLog "TIK$merk -> $($sess.name) : no window found"
+        return (T 'err.noWindow')
+    }
+
+    if (-not $Btn) { $Btn = '1' }
+    $r = Invoke-DashAction $sess $Btn
+    Reset-SessieCache
+    return $r
+}
+
+<#
   Get a window forward, preferring the HUD.
 
   The HUD is a GUI process and Windows lets it call SetForegroundWindow; this
@@ -111,6 +161,12 @@ function Resolve-DashFocus($sess) {
     return @{ Found = $true; Raised = [bool]$w.Raised; Title = [string]$w.Title; Handle = $w.Handle }
 }
 
+<#
+  The label shown on a button. An explicit "label" in actions.json always wins;
+  without one we fall back to "labelKey", which points at langlib.ps1 so the
+  buttons follow the Windows display language like everything else. Any
+  "minutes" is passed in, which is what makes "Snooze {0} min" work.
+#>
 function Get-ButtonLabel($def, [string]$btn) {
     if ($def -and $def.label)    { return [string]$def.label }
     if ($def -and $def.labelKey) { return (T ([string]$def.labelKey) @($def.minutes)) }
@@ -398,6 +454,156 @@ function Get-SessieCache {
 # After an action the cache is stale: the next poll must see the result.
 function Reset-SessieCache { $script:cacheAt = [datetime]::MinValue }
 
+<#
+  ---- the USB bridge ---------------------------------------------------------
+
+  The display normally polls over HTTP. On a network where port 8787 is blocked
+  -- an office firewall, say -- that leaves the screen useless while the thing is
+  hanging off the laptop by a cable that could carry the same bytes. So it does.
+
+  We push, rather than answer requests. Every $SerialPushMs the exact same
+  Format-Cyd payload goes out over the cable, wrapped in markers. The display
+  keeps the last block it received and prefers it while it is fresh, so it needs
+  no handshake and never blocks waiting for a reply that is not coming. Put the
+  display on a USB charger with no PC and nothing arrives, so it quietly goes
+  back to Wi-Fi by itself.
+
+  Lines from the display start with @ so they can never be confused with the
+  debug output the sketch also writes to the same serial port.
+
+  No token check here, unlike /action over the network: a request over this
+  channel came in over a physical cable plugged into this machine. Somebody who
+  can do that has the keyboard anyway.
+#>
+$script:ser          = $null
+$script:serPortName  = ''
+$script:serLastPush  = [datetime]::MinValue
+$script:serLastTry   = [datetime]::MinValue
+$script:serReleaseTo = [datetime]::MinValue
+$script:serBuf       = ''
+$script:serPortsSeen = ''
+$script:serCh340     = ''
+
+<#
+  Which COM port is the display on?
+
+  By chip, never by number: this same board turned up as COM12 and later as
+  COM16 on this machine, so a fixed name breaks the moment you replug it.
+
+  The catch is that the PnP query costs about a second, which is far too slow to
+  run in the service loop. GetPortNames() costs 10 ms, so that is the gate: only
+  when the set of ports actually changes do we pay for the lookup.
+#>
+function Find-DashSerialPort {
+    $namen = ''
+    try { $namen = ([System.IO.Ports.SerialPort]::GetPortNames() | Sort-Object) -join ',' } catch { return '' }
+    if ($namen -eq $script:serPortsSeen) { return $script:serCh340 }
+    $script:serPortsSeen = $namen
+    $script:serCh340 = ''
+    try {
+        $d = @(Get-CimInstance Win32_PnPEntity -ErrorAction Stop |
+               Where-Object { $_.PNPDeviceID -match 'VID_1A86' -and $_.Name -match 'COM\d+' })
+        foreach ($x in $d) {
+            $m = [regex]::Match($x.Name, 'COM\d+')
+            if ($m.Success) { $script:serCh340 = $m.Value; break }
+        }
+    } catch { }
+    return $script:serCh340
+}
+
+function Close-DashSerial([string]$reden) {
+    if ($null -eq $script:ser) { return }
+    $naam = $script:serPortName
+    try { $script:ser.Close() } catch { }
+    try { $script:ser.Dispose() } catch { }
+    $script:ser = $null
+    $script:serPortName = ''
+    $script:serBuf = ''
+    Write-DashLog "serial: released $naam ($reden)"
+}
+
+function Open-DashSerial {
+    if ($null -ne $script:ser) { return $true }
+    if ([datetime]::UtcNow -lt $script:serReleaseTo) { return $false }
+    # Retry slowly. While the port is held by the Arduino IDE every attempt
+    # throws, and hammering that three times a second would fill the log.
+    if (([datetime]::UtcNow - $script:serLastTry).TotalSeconds -lt 5) { return $false }
+    $script:serLastTry = [datetime]::UtcNow
+
+    $poort = Find-DashSerialPort
+    if (-not $poort) { return $false }
+    try {
+        $p = New-Object System.IO.Ports.SerialPort $poort, 115200, 'None', 8, 'One'
+        <#
+          DTR and RTS drive the auto-reset circuit on a CH340. Leave them on and
+          the display reboots every time this service starts -- measured earlier:
+          opening with DTR asserted restarted the board, without it did not.
+        #>
+        $p.DtrEnable    = $false
+        $p.RtsEnable    = $false
+        $p.ReadTimeout  = 20
+        $p.WriteTimeout = 500
+        $p.NewLine      = "`n"
+        $p.Open()
+        $script:ser = $p
+        $script:serPortName = $poort
+        $script:serLastPush = [datetime]::MinValue   # push straight away
+        Write-DashLog "serial: attached to $poort"
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Send-DashSerialLine([string]$line) {
+    if ($null -eq $script:ser) { return }
+    try { $script:ser.Write($line + "`n") } catch { Close-DashSerial 'write failed' }
+}
+
+function Invoke-DashSerialLine([string]$line) {
+    $snap = Get-SessieCache
+    if ($line -match '^@FOCUS\s+(\S+)') {
+        Send-DashSerialLine ('@REPLY ' + (Invoke-DashTap -All $snap.all -Sid $Matches[1] -Kind 'focus' -Via 'USB'))
+        return
+    }
+    if ($line -match '^@ACTION\s+(\S+)\s+(\S+)') {
+        Send-DashSerialLine ('@REPLY ' + (Invoke-DashTap -All $snap.all -Sid $Matches[1] -Kind 'action' -Btn $Matches[2] -Via 'USB'))
+        return
+    }
+}
+
+function Update-DashSerial {
+    if (-not $SerialBridge) { return }
+
+    if ([datetime]::UtcNow -lt $script:serReleaseTo) {
+        if ($null -ne $script:ser) { Close-DashSerial 'released for flashing' }
+        return
+    }
+    if (-not (Open-DashSerial)) { return }
+
+    if (([datetime]::UtcNow - $script:serLastPush).TotalMilliseconds -ge $SerialPushMs) {
+        $script:serLastPush = [datetime]::UtcNow
+        try {
+            $snap = Get-SessieCache
+            $script:ser.Write("<<<CYD`n" + (Format-Cyd $snap.payload) + ">>>`n")
+        } catch { Close-DashSerial 'write failed'; return }
+    }
+
+    try {
+        if ($script:ser.BytesToRead -gt 0) { $script:serBuf += $script:ser.ReadExisting() }
+    } catch { Close-DashSerial 'read failed'; return }
+
+    # Guard against a peer that never sends a newline: drop what cannot be a line.
+    if ($script:serBuf.Length -gt 4096) { $script:serBuf = '' }
+
+    while ($script:serBuf.Contains("`n")) {
+        $i = $script:serBuf.IndexOf("`n")
+        $regel = $script:serBuf.Substring(0, $i).Trim()
+        $script:serBuf = $script:serBuf.Substring($i + 1)
+        if ($regel.StartsWith('@')) { Invoke-DashSerialLine $regel }
+    }
+}
+
 $listener = New-Object System.Net.Sockets.TcpListener ([System.Net.IPAddress]::Any), $Port
 try { $listener.Start() } catch {
     Write-Host "Kan poort $Port niet openen: $($_.Exception.Message)"
@@ -411,7 +617,25 @@ Write-Host "Claude sessie-API draait op poort $Port"
 foreach ($ip in $ips) { Write-Host "  http://$($ip):$Port/cyd.txt" }
 Write-Host 'Stoppen met Ctrl+C.'
 
+<#
+  The loop polls instead of blocking.
+
+  AcceptTcpClient() blocks until somebody connects, which left no moment to
+  service the USB bridge: on a quiet network the bridge would simply never run.
+  Pending() asks whether anything is waiting, so the two share this one thread
+  without runspaces and without either starving the other.
+
+  The 15 ms sleep keeps the loop off the CPU. It costs nothing noticeable: a tap
+  on the display already travels over a 3-second poll.
+#>
 while ($true) {
+    Update-DashSerial
+
+    if (-not $listener.Pending()) {
+        Start-Sleep -Milliseconds 15
+        continue
+    }
+
     $client = $null
     try {
         $client = $listener.AcceptTcpClient()
@@ -450,6 +674,22 @@ while ($true) {
         $ctype = 'text/plain; charset=utf-8'
 
         switch ($path) {
+            '/serial/release' {
+                <#
+                  Let go of the COM port so you can flash or open a serial
+                  monitor. The bridge grabs it again by itself afterwards, so
+                  this is a pause and not a switch you have to remember to undo.
+                #>
+                $sec = 60
+                if ($q['sec']) { try { $sec = [int]$q['sec'] } catch { } }
+                if ($sec -lt 5)   { $sec = 5 }
+                if ($sec -gt 600) { $sec = 600 }
+                $script:serReleaseTo = [datetime]::UtcNow.AddSeconds($sec)
+                Close-DashSerial 'released on request'
+                Write-DashLog "serial: releasing the port for $sec s"
+                $body = "ok released for $sec s"
+            }
+
             '/demo' {
                 # Kick the display into its cracktro from the PC. Handy for showing
                 # it off without walking over to press BOOT.
@@ -467,39 +707,9 @@ while ($true) {
                 if ($token -and $q['t'] -ne $token) {
                     $body = (T 'err.badToken')
                 } else {
-                    $sid  = [string]$q['id']
-                    $sess = $null
-                    foreach ($s in ($all | Where-Object { $_.visible })) {
-                        if ($s.session_id -eq $sid) { $sess = $s; break }
-                    }
-                    # no id sent? then the session that has been waiting longest
-                    if (-not $sess) {
-                        $sess = @($all | Where-Object { $_.visible -and $_.state -eq 'attention' } | Sort-Object sort_ts)[0]
-                    }
-                    if (-not $sess) {
-                        $body = (T 'err.noSession')
-                    } elseif ($path -eq '/focus') {
-                        Reset-SessieCache
-                        $w = Resolve-DashFocus $sess
-                        if ($w.Found -and $w.Raised) {
-                            Write-DashLog "TIK -> $($sess.name) : $($w.Title)"
-                            $body = (T 'ok.action' @($sess.name))
-                        } elseif ($w.Found) {
-                            # Gevonden, maar Windows liet het niet naar voren komen.
-                            # Dat is iets anders dan "geen venster", en het scherm
-                            # hoort dat verschil te zien.
-                            Write-DashLog "TIK -> $($sess.name) : gevonden maar niet naar voren gekomen ($($w.Title))"
-                            $body = (T 'err.windowNotRaised')
-                        } else {
-                            Write-DashLog "TIK -> $($sess.name) : geen venster gevonden"
-                            $body = 'err geen venster'
-                        }
-                    } else {
-                        $btn  = [string]$q['b']
-                        if (-not $btn) { $btn = '1' }
-                        $body = Invoke-DashAction $sess $btn
-                        Reset-SessieCache
-                    }
+                    $soort = if ($path -eq '/focus') { 'focus' } else { 'action' }
+                    $body = Invoke-DashTap -All $all -Sid ([string]$q['id']) `
+                                -Kind $soort -Btn ([string]$q['b'])
                 }
             }
 

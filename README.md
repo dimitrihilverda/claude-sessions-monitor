@@ -15,7 +15,9 @@ project surfaces that state in three places that share one source of truth.
 | **Web page** | The same list on your phone or tablet, on your own network |
 
 Everything runs locally. Nothing leaves your machine: session state comes from
-Claude Code's own hooks, and the web service listens only on your LAN.
+Claude Code's own hooks, and the web service listens only on your LAN. The
+display can also take the same data straight over its USB cable, so a network
+that blocks the port does not leave you with a blank screen.
 
 ```
                     Claude Code
@@ -171,6 +173,22 @@ the parametric generator that produced the STLs.
 > `User_Setup_CYD.h` sets `TFT_INVERSION_ON` for this reason; none of the
 > ILI9341 init sequences in TFT_eSPI send an inversion command themselves. This
 > is worth knowing because it makes colour changes look like nothing happened.
+
+## When the network is not an option
+
+Office networks tend to block a port like 8787, and a guest network often blocks
+traffic between devices entirely. The display then has nothing to poll — while
+hanging off the laptop by a cable that could carry the same bytes.
+
+So it does. The web service pushes the identical payload over USB serial every
+three seconds, and the display prefers it whenever it is arriving. Nothing to
+configure: plug it in and it uses the cable, unplug it and it goes back to Wi-Fi
+by itself. Taps and button presses travel back the same way.
+
+One consequence worth knowing: the service holds the COM port, so a flash or a
+serial monitor fails while it is attached. The HUD's right-click menu has
+**"Release the USB port"** for exactly that — it lets go for a minute and
+reattaches on its own, so there is nothing to switch back.
 
 ## Physical buttons and actions
 

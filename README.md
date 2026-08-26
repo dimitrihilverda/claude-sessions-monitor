@@ -161,6 +161,15 @@ on the back, sold for around £10. It polls your PC every three seconds and show
 one row per session. Tapping a row brings that terminal window to the front on
 your PC — the same thing clicking in the HUD does.
 
+> **Raising a window taps the Alt key.** Windows will not let a program put
+> itself in front while you are working in something else, and that refusal is a
+> latch rather than a delay you can wait out: every call to raise the window
+> reports success and nothing moves. Only the user pressing Alt or Esc releases
+> it. So the HUD presses Alt — down and back up in the same breath, too briefly
+> for a menu bar to open — and then asks. Without it, tapping a row worked only
+> when the window was already in front, which is the one case where you did not
+> need it.
+
 ### The other board: Guition JC3248W535C
 
 The same firmware also runs on a Guition JC3248W535C — an ESP32-S3 with a
@@ -169,11 +178,21 @@ sets its type a size larger; everything else behaves identically, and the
 [web flasher](https://dimitrihilverda.github.io/claude-sessions-monitor/) works
 out which of the two you plugged in.
 
-Two differences worth knowing. It has no RGB LED and no speaker on a plain pin,
-so the status light and the attention beep are simply absent there. And its panel
+Three differences worth knowing. It has no RGB LED and no speaker on a plain pin,
+so the status light and the attention beep are simply absent there. Its panel
 cannot rotate in hardware and dislikes partial writes, so the whole frame is
 drawn in PSRAM and pushed at once — which means a build without PSRAM enabled
 will not run, and says so on the serial port rather than showing a blank screen.
+And it speaks USB itself instead of through a CH340, so it needs no driver and
+turns up as an Espressif device rather than a serial adapter.
+
+> **Its touch controller answers even when nobody is touching it.** Asked out of
+> the blue, the AXS15231B replies with whatever it last had — measured here, a
+> point that never changes. So the firmware reads it only after its interrupt
+> line has fallen, and checks that the answer could be a finger at all. Without
+> both, the screen reads a permanent press along the top edge, opens its own
+> setup portal a second after every boot, and from inside that portal it never
+> looks at the cable again.
 
 The easter egg is the CYD's alone: it talks to TFT_eSPI directly instead of going
 through the drawing layer, which is exactly the kind of shortcut a second board
@@ -242,10 +261,23 @@ three seconds, and the display prefers it whenever it is arriving. Nothing to
 configure: plug it in and it uses the cable, unplug it and it goes back to Wi-Fi
 by itself. Taps and button presses travel back the same way.
 
+The port is found by which chip is on it, never by number: the same board has
+turned up as COM12 and later as COM16 on one machine. That means two vendors,
+because the two boards present differently — the CYD through its CH340, the
+Guition through the ESP32-S3's own USB. With both plugged in the CYD wins, so a
+machine that has been driving one carries on driving it.
+
 One consequence worth knowing: the service holds the COM port, so a flash or a
 serial monitor fails while it is attached. The HUD's right-click menu has
 **"Release the USB port"** for exactly that — it lets go for a minute and
 reattaches on its own, so there is nothing to switch back.
+
+> **Give the display a moment before you unplug the cable and walk off.** A board
+> that has never been given Wi-Fi settings, and boots while nothing is pushing
+> down the cable, goes to its setup portal — and that portal does not read the
+> serial port, so a cable that comes alive afterwards goes unnoticed until the
+> next restart. Flashing hits this every time, because flashing is exactly when
+> the service has let the port go.
 
 ## Physical buttons and actions
 

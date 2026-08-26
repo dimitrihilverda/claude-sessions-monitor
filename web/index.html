@@ -94,9 +94,12 @@
   <ul>
     <li><strong>A USB data cable.</strong> Plenty of cables only carry power. If the
       port never appears, that is the first thing to swap.</li>
-    <li><strong>The CH340 driver.</strong> Most systems have it; Windows sometimes
-      does not. If no serial port shows up, install it from
-      <a href="https://www.wch-ic.com/downloads/CH341SER_EXE.html">WCH</a>.</li>
+    <li><strong>The CH340 driver &mdash; for the Cheap Yellow Display only.</strong>
+      Most systems have it; Windows sometimes does not. If no serial port shows up,
+      install it from
+      <a href="https://www.wch-ic.com/downloads/CH341SER_EXE.html">WCH</a>.
+      The Guition needs no driver: it speaks USB itself, and turns up as an
+      Espressif device rather than a serial adapter.</li>
     <li><strong>Close the Arduino IDE</strong> and any serial monitor. Only one
       program can hold the port &mdash; and if you already run the PC service,
       release the port from the HUD menu first (see below).</li>
@@ -122,6 +125,14 @@
     To change them later, hold your finger on the top bar of the display for two
     seconds. That is the way back in when the display is on Wi-Fi but the PC address
     has gone stale &mdash; in that case the portal never appears on its own.
+  </p>
+  <p class="note">
+    If you mean to skip Wi-Fi altogether and run it down the cable, restart the
+    display once the PC service has the port back. A board with no settings that
+    boots while nothing is pushing goes to this portal, and the portal does not
+    watch the cable &mdash; so a cable that comes alive afterwards goes unnoticed
+    until the next restart. Flashing hits this every time, because flashing is
+    exactly when the service has let the port go.
   </p>
 
   <h2>What you get</h2>

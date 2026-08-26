@@ -32,6 +32,7 @@
    opinion about which board it is running on. Set BOARD_KIND at compile time to
    pick a backend; it defaults to the CYD. */
 #include "gfx.h"
+#include "board.h"
 
 /* ---- SETTINGS --------------------------------------------------------------
    You do NOT need to fill in Wi-Fi or the PC address here. You set those on
@@ -78,33 +79,13 @@ const uint32_t POLL_MS       = 3000;   // how often we ask the PC for the state
    at "no connection" for tens of seconds. */
 const uint32_t POLL_MS_OFF   = 1200;
 const uint8_t  BACKLIGHT_PCT = 70;     // brightness 0-100
-const bool     BEEP_ENABLED  = true;   // beep on a new attention request
-#define USE_RGB_LED   1                // the status LED on the board itself
+const bool     BEEP_ENABLED  = BOARD_HAS_SPK;   // beep on a new attention request
 
 // ---- hardware --------------------------------------------------------------
-#define PIN_BL     21     // backlight
-#define PIN_SPK    26     // audio output of the CYD
-#define LEDC_BL     0
-#define LEDC_TONE   1
-
-// RGB LED on the CYD (active LOW)
-#define PIN_LED_R   4
-#define PIN_LED_G  16
-#define PIN_LED_B  17
-
-/* The three buttons. GPIO 22 and 27 come out on the JST connectors and have an
-   internal pull-up: switch between the pin and GND, done.
-   GPIO 35 is input-only and has NO internal pull-up -- that one needs a 10k
-   resistor between the pin and 3V3. The CYD's own BOOT button (GPIO 0) joins in
-   as a fourth button; just do not hold it during power-up, or the ESP32 goes
-   into flash mode. */
+/* Which pins, which of these the board actually has, and how tall a row is:
+   all of that is in board.h, next to the same answers for the other panel. */
 struct Btn { uint8_t pin; bool pullup; const char* id; };
-Btn BUTTONS[] = {
-  { 22, true,  "1" },
-  { 27, true,  "2" },
-  { 35, false, "3" },   // external 10k pull-up to 3V3
-  {  0, true,  "4" }    // BOOT button
-};
+Btn BUTTONS[] = BOARD_BUTTONS;
 const int N_BTN = sizeof(BUTTONS) / sizeof(BUTTONS[0]);
 bool     btnWas[8];
 uint32_t btnAt[8];
@@ -144,22 +125,16 @@ uint16_t blend565(uint16_t fg, uint16_t bg, uint8_t alpha) {
 }
 
 /* ---- layout ----------------------------------------------------------------
-   Derived from the panel rather than hardcoded, so a 480x320 board gets wider
-   rows and a wider button bar without a second set of numbers to keep in step.
-   Only the heights are fixed: they are set by how tall the type is. */
+   Widths come from the panel; the heights and the type sizes come from board.h,
+   because how tall a row has to be is set by how tall the type is and the two
+   boards do not use the same type. */
 #define SCR_W     (gfxWidth())
 #define SCR_H     (gfxHeight())
-#define HDR_H     28
-#define ROW_Y     30
-#define ROW_H     41
-#define MAX_ROWS   4      // rows that fit on screen at once
 /* How many sessions we keep in memory. The PC sends every visible one, and the
    old code threw away everything past the fourth -- so with five sessions the
    fifth did not exist as far as the display was concerned. Keeping more costs a
    little RAM and buys scrolling. */
 #define MAX_SESS  16
-#define BAR_Y    196
-#define BAR_H     44
 
 // ---- session state ---------------------------------------------------------
 struct Sess { String state, name, since, why, id; };
@@ -336,16 +311,16 @@ void drawHeader() {
   /* Offline the display has to say it itself; online the PC supplies the whole
      sentence already composed, because only there is it known whether it should
      read "1 needs you" or "2 need you" -- and in which language. */
-  gfxText(GF_SMALL, GA_TL, 10, 5, online ? uiHeader : String(TXT_OFFLINE), ink, bg);
+  gfxText(GF_SMALL, GA_TL, 10, HDR_TXT_Y, online ? uiHeader : String(TXT_OFFLINE), ink, bg);
 
   String right = (millis() < toastUntil) ? toast : clockTxt;
-  gfxText(GF_SMALL, GA_TR, SCR_W - 10, 5, right, ink, bg);
+  gfxText(GF_SMALL, GA_TR, SCR_W - 10, HDR_TXT_Y, right, ink, bg);
 
   /* Say which pipe the data came in over. Without it "it works" and "it works
      over the cable" look identical, and that is exactly what you want to know
      when the network is the thing you are unsure about. */
   if (serialFresh()) {
-    gfxText(GF_SMALL, GA_TR, SCR_W - 20 - gfxTextWidth(GF_SMALL, right), 5,
+    gfxText(GF_SMALL, GA_TR, SCR_W - 20 - gfxTextWidth(GF_SMALL, right), HDR_TXT_Y,
             "USB", alarm ? COL_BG : COL_GREEN, bg);
   }
   gfxDrawHLine(0, HDR_H, SCR_W, COL_LINE);
@@ -358,7 +333,7 @@ void drawRow(int i) {
   int y = ROW_Y + i * ROW_H;
   int r = scrollTop + i;
   const int RW = SCR_W - 12;              // row surface, 6 px margin either side
-  gfxBufBegin(SCR_W, ROW_H - 3);
+  gfxBufBegin(0, y, SCR_W, ROW_H - 3);
   gfxBufFill(COL_BG);
 
   if (r < nRows) {
@@ -373,11 +348,11 @@ void drawRow(int i) {
     // Short names large, longer titles a size smaller: since the beacon started
     // sending the real session title, those names are much longer than a folder name.
     String nm = rows[r].name;
-    if (nm.length() <= 16) {
-      gfxBufText(GF_BIG, GA_TL, 16, 2, nm, COL_TXT, rowBg);
+    if (nm.length() <= NAME_BIG_MAX) {
+      gfxBufText(GF_BIG, GA_TL, 16, NAME_Y, nm, COL_TXT, rowBg);
     } else {
-      if (nm.length() > 34) nm = nm.substring(0, 33) + ".";
-      gfxBufText(GF_SMALL, GA_TL, 16, 4, nm, COL_TXT, rowBg);
+      if (nm.length() > NAME_MAX) nm = nm.substring(0, NAME_MAX - 1) + ".";
+      gfxBufText(GF_SMALL, GA_TL, 16, NAME_SM_Y, nm, COL_TXT, rowBg);
     }
 
     /* State chip, just like Draw-Chip in hud.ps1: fill in the state colour at
@@ -385,15 +360,15 @@ void drawRow(int i) {
        where the green (and the orange, on attention) really shows. */
     uint16_t chipBg = blend565(c, rowBg, 38);
     String lbl = stateLabel(rows[r].state);
-    int cw = gfxBufTextWidth(GF_SMALL, lbl) + 14, ch = 17;
+    int cw = gfxBufTextWidth(GF_SMALL, lbl) + 14, ch = CHIP_H;
     int cx = SCR_W - 14 - cw, cy = 3;
     gfxBufRoundRect(cx, cy, cw, ch, 4, chipBg);
     gfxBufDrawRoundRect(cx, cy, cw, ch, 4, blend565(c, rowBg, 150));
     gfxBufText(GF_SMALL, GA_MC, cx + cw / 2, cy + ch / 2, lbl, c, chipBg);
 
     String w = rows[r].since + "  " + rows[r].why;
-    if (w.length() > 52) w = w.substring(0, 51) + ".";
-    gfxBufText(GF_SMALL, GA_TL, 16, 23, w, COL_MUTED, rowBg);
+    if (w.length() > WHY_MAX) w = w.substring(0, WHY_MAX - 1) + ".";
+    gfxBufText(GF_SMALL, GA_TL, 16, INFO_Y, w, COL_MUTED, rowBg);
   } else if (r == 0) {
     if (online) {
       gfxBufText(GF_SMALL, GA_TL, 16, 10, uiEmpty, COL_MUTED, COL_BG);
@@ -424,7 +399,7 @@ void drawRow(int i) {
     }
   }
 
-  gfxBufPush(0, y);
+  gfxBufPush();
   gfxBufEnd();
 }
 
@@ -434,8 +409,8 @@ void drawRow(int i) {
    nobody noticed; with a button that lights up you see immediately that you
    pressed next to it. */
 void btnRect(int i, int& x, int& w) {
-  w = 100;
-  x = 6 + i * (w + 4);
+  w = BTN_W;
+  x = 6 + i * (w + BTN_GAP);
 }
 
 /* The third slot doubles as the scroll control once there are more sessions than
@@ -550,7 +525,7 @@ void drawRetry() {
 
   // a bar filling towards the next attempt
   int vol = (int)((uint32_t)RW * sinds / interval);
-  gfxBufBegin(SCR_W, 22);
+  gfxBufBegin(0, Y, SCR_W, 22);
   gfxBufFill(COL_BG);
   gfxBufRect(6, 0, RW, 3, COL_ROW);
   gfxBufRect(6, 0, vol, 3, COL_ORANGE);
@@ -563,7 +538,7 @@ void drawRetry() {
   if (WiFi.status() == WL_CONNECTED) s += "  -  " + String(WiFi.RSSI()) + " dBm";
   else                               s += "  -  no wifi";
   gfxBufText(GF_SMALL, GA_TL, 16, 7, s, COL_MUTED, COL_BG);
-  gfxBufPush(0, Y);
+  gfxBufPush();
   gfxBufEnd();
 }
 
@@ -575,8 +550,8 @@ void drawAll() {
 
 void flashAttention() {
   for (int k = 0; k < 3; k++) {
-    gfxFillRect(0, 0, SCR_W, HDR_H, COL_ORANGE); delay(120);
-    gfxFillRect(0, 0, SCR_W, HDR_H, COL_BG);     delay(120);
+    gfxFillRect(0, 0, SCR_W, HDR_H, COL_ORANGE); gfxFlushNow(); delay(120);
+    gfxFillRect(0, 0, SCR_W, HDR_H, COL_BG);     gfxFlushNow(); delay(120);
   }
   drawHeader();
 }
@@ -660,6 +635,10 @@ String serialAsk(const String& cmd) {
 
 // ---- talking to the PC -----------------------------------------------------
 String httpGet(const String& path) {
+  /* Show what has been drawn before blocking on the network. Without this a
+     tapped row would not light up until its request had come back, which on a
+     PC that is not answering is the entire HTTP timeout. */
+  gfxFlushNow();
   if (WiFi.status() != WL_CONNECTED) {
     static uint32_t lastWifiLog = 0;
     if (millis() - lastWifiLog > 2000) { lastWifiLog = millis(); Serial.println("poll: wifi not connected"); }
@@ -1494,6 +1473,12 @@ void loop() {
   if (toastUntil && millis() > toastUntil && millis() - lastHdr > 200) {
     toastUntil = 0; lastHdr = millis(); drawHeader();
   }
+
+  /* One frame per pass. On the CYD this is nothing at all -- every draw call
+     already went straight to the glass. On the S3 this is where a frame becomes
+     visible, and doing it once here rather than inside every drawing function
+     keeps a full repaint to a single 300 KB push instead of six. */
+  gfxFlushNow();
 
   delay(20);
 }

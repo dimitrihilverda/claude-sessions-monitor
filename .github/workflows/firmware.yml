@@ -35,7 +35,7 @@ jobs:
         run: |
           arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
           arduino-cli core install esp32:esp32 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-          arduino-cli lib install "TFT_eSPI" "XPT2046_Touchscreen"
+          arduino-cli lib install "TFT_eSPI" "XPT2046_Touchscreen" "GFX Library for Arduino"
 
       - name: Apply the CYD display settings
         # TFT_eSPI reads its pin configuration from User_Setup.h inside the
@@ -46,7 +46,7 @@ jobs:
           cp cyd/User_Setup_CYD.h "$setup_dir/User_Setup.h"
           grep -q 'TFT_INVERSION_ON' "$setup_dir/User_Setup.h"
 
-      - name: Compile
+      - name: Compile for the Cheap Yellow Display
         run: |
           mkdir -p build
           # The version goes into the firmware as well as the manifest, so the
@@ -58,6 +58,19 @@ jobs:
             --output-dir build \
             --warnings all \
             --build-property "compiler.cpp.extra_flags=-DFW_VERSION=\"$version\"" \
+            cyd/claude_hud_cyd
+
+      - name: Compile for the Guition JC3248W535C
+        # Same sketch, other panel: BOARD_KIND picks the drawing backend and the
+        # layout metrics. PSRAM is not optional here -- the 480x320 frame buffer
+        # is 300 KB and does not fit in internal RAM next to Wi-Fi.
+        run: |
+          mkdir -p build-s3
+          arduino-cli compile \
+            --fqbn "esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=huge_app,FlashMode=qio,CPUFreq=240,USBMode=hwcdc,CDCOnBoot=cdc" \
+            --output-dir build-s3 \
+            --warnings all \
+            --build-property "compiler.cpp.extra_flags=-DFW_VERSION=\"$FW_VERSION\" -DBOARD_KIND=BOARD_S3" \
             cyd/claude_hud_cyd
 
       - name: Assemble the site
@@ -72,17 +85,26 @@ jobs:
           echo "core: $core_dir"
           test -f "$core_dir/tools/partitions/boot_app0.bin"
 
-          mkdir -p _site/firmware
+          mkdir -p _site/firmware _site/firmware/s3
           cp web/index.html _site/
           cp build/claude_hud_cyd.ino.bootloader.bin _site/firmware/bootloader.bin
           cp build/claude_hud_cyd.ino.partitions.bin _site/firmware/partitions.bin
           cp "$core_dir/tools/partitions/boot_app0.bin" _site/firmware/boot_app0.bin
           cp build/claude_hud_cyd.ino.bin            _site/firmware/app.bin
 
+          cp build-s3/claude_hud_cyd.ino.bootloader.bin _site/firmware/s3/bootloader.bin
+          cp build-s3/claude_hud_cyd.ino.partitions.bin _site/firmware/s3/partitions.bin
+          cp "$core_dir/tools/partitions/boot_app0.bin"  _site/firmware/s3/boot_app0.bin
+          cp build-s3/claude_hud_cyd.ino.bin             _site/firmware/s3/app.bin
+
           version="$FW_VERSION"
+          # One manifest, two builds: the flasher reads the chip out of the board
+          # you plug in and picks the matching set itself. Note the bootloader
+          # offset differs -- 0x1000 on the ESP32, 0x0 on the S3 -- and getting
+          # that wrong produces a board that flashes fine and never boots.
           cat > _site/manifest.json <<EOF
           {
-            "name": "Claude Sessions Monitor (Cheap Yellow Display)",
+            "name": "Claude Sessions Monitor",
             "version": "$version",
             "new_install_prompt_erase": true,
             "builds": [
@@ -94,6 +116,15 @@ jobs:
                   { "path": "firmware/boot_app0.bin",  "offset": 57344 },
                   { "path": "firmware/app.bin",        "offset": 65536 }
                 ]
+              },
+              {
+                "chipFamily": "ESP32-S3",
+                "parts": [
+                  { "path": "firmware/s3/bootloader.bin", "offset": 0 },
+                  { "path": "firmware/s3/partitions.bin", "offset": 32768 },
+                  { "path": "firmware/s3/boot_app0.bin",  "offset": 57344 },
+                  { "path": "firmware/s3/app.bin",        "offset": 65536 }
+                ]
               }
             ]
           }
@@ -102,8 +133,22 @@ jobs:
           echo "--- site ---"
           find _site -type f -printf '%10s  %p\n'
 
-      - name: Check the manifest is valid JSON
-        run: python3 -c "import json;json.load(open('_site/manifest.json'));print('manifest ok')"
+      - name: Check the manifest
+        # Valid JSON is not enough: a missing part file gives a flasher that
+        # fails halfway through, on someone else's hardware.
+        run: |
+          python3 - <<'PY'
+          import json, os
+          m = json.load(open('_site/manifest.json'))
+          families = [b['chipFamily'] for b in m['builds']]
+          assert families == ['ESP32', 'ESP32-S3'], families
+          for b in m['builds']:
+              for p in b['parts']:
+                  path = os.path.join('_site', p['path'])
+                  assert os.path.isfile(path), path
+                  print('%-34s %8d bytes @ %d' % (p['path'], os.path.getsize(path), p['offset']))
+          print('manifest ok: %s' % ', '.join(families))
+          PY
 
       - uses: actions/upload-pages-artifact@v3
         with:

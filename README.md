@@ -160,6 +160,24 @@ on the back, sold for around £10. It polls your PC every three seconds and show
 one row per session. Tapping a row brings that terminal window to the front on
 your PC — the same thing clicking in the HUD does.
 
+### The other board: Guition JC3248W535C
+
+The same firmware also runs on a Guition JC3248W535C — an ESP32-S3 with a
+480×320 QSPI panel and capacitive touch. It shows five rows instead of four and
+sets its type a size larger; everything else behaves identically, and the
+[web flasher](https://dimitrihilverda.github.io/claude-sessions-monitor/) works
+out which of the two you plugged in.
+
+Two differences worth knowing. It has no RGB LED and no speaker on a plain pin,
+so the status light and the attention beep are simply absent there. And its panel
+cannot rotate in hardware and dislikes partial writes, so the whole frame is
+drawn in PSRAM and pushed at once — which means a build without PSRAM enabled
+will not run, and says so on the serial port rather than showing a blank screen.
+
+The easter egg is the CYD's alone: it talks to TFT_eSPI directly instead of going
+through the drawing layer, which is exactly the kind of shortcut a second board
+turns into work.
+
 ### Using it
 
 | On the display | What it does |

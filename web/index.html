@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Flash the Cheap Yellow Display &middot; Claude Sessions Monitor</title>
+<title>Flash your display &middot; Claude Sessions Monitor</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232A3238'/><rect x='6' y='9' width='20' height='14' rx='2' fill='%2391C847'/></svg>">
 <style>
   :root {
@@ -57,14 +57,25 @@
 <body>
 <main>
 
-  <h1>Flash the Cheap Yellow Display</h1>
+  <h1>Flash your display</h1>
   <p class="lead">
     Puts <a href="https://github.com/dimitrihilverda/claude-sessions-monitor">Claude&nbsp;Sessions&nbsp;Monitor</a>
-    firmware on an ESP32-2432S028R, straight from this page. No Arduino IDE, no
+    firmware on your board, straight from this page. No Arduino IDE, no
     toolchain. The display then shows your live Claude&nbsp;Code sessions and which
     one is waiting for you &mdash; over Wi-Fi, or over the USB cable when the
     network will not cooperate.
   </p>
+  <p>
+    Two boards are supported, and you do not have to choose: the flasher reads
+    which chip you plugged in and sends the matching firmware.
+  </p>
+  <ul>
+    <li><b>Cheap Yellow Display</b> (ESP32-2432S028R) &mdash; 320&times;240, resistive
+      touch, four rows on screen.</li>
+    <li><b>Guition JC3248W535C</b> (ESP32-S3, 480&times;320 QSPI) &mdash; capacitive
+      touch, five rows, and larger type. Needs the PSRAM version of the board;
+      the firmware says so on the serial port if it is missing.</li>
+  </ul>
 
   <div class="card flash">
     <div class="ready">
@@ -155,9 +166,9 @@
 
   <h2>It flashed, and the screen is white</h2>
   <p>
-    Then the panel is fine but its settings are not. This build ships the right
-    <code>User_Setup.h</code>, so a white screen after flashing from this page points
-    at a different board revision. The
+    On the Cheap Yellow Display the panel is then fine but its settings are not.
+    This build ships the right <code>User_Setup.h</code>, so a white screen after
+    flashing from this page points at a different board revision. The
     <a href="https://github.com/dimitrihilverda/claude-sessions-monitor/blob/main/cyd/README-cyd.md#3-when-something-is-wrong">troubleshooting
     table</a> walks through white screens, inverted colours and mirrored displays.
   </p>

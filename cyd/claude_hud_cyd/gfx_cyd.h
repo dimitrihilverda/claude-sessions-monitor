@@ -36,6 +36,7 @@ static SPIClass    gTpSpi(VSPI);
 static XPT2046_Touchscreen gTs(TP_CS, TP_IRQ);
 
 static bool gBufAlive = false;
+static int  gBufX = 0, gBufY = 0;   // where the sprite is headed
 
 // ---- how big is the screen, and how big is the type -------------------------
 static inline int gfxWidth()  { return 320; }
@@ -64,6 +65,10 @@ static inline void gfxBegin() {
   gTft.setRotation(1);            // landscape, USB on the left
 }
 
+/* Nothing to push: TFT_eSPI writes straight to the panel. Present so the sketch
+   can be written for the panel that does need it. */
+static inline void gfxFlushNow() { }
+
 static inline void gfxFillScreen(uint16_t c)                        { gTft.fillScreen(c); }
 static inline void gfxFillRect(int x, int y, int w, int h, uint16_t c) { gTft.fillRect(x, y, w, h, c); }
 static inline void gfxFillRoundRect(int x, int y, int w, int h, int r, uint16_t c) { gTft.fillRoundRect(x, y, w, h, r, c); }
@@ -88,8 +93,9 @@ static inline int gfxTextWidth(GfxFont f, const String& s) {
 }
 
 // ---- the offscreen buffer, for drawing a row without flicker ----------------
-static inline void gfxBufBegin(int w, int h) {
+static inline void gfxBufBegin(int x, int y, int w, int h) {
   if (gBufAlive) gBuf.deleteSprite();
+  gBufX = x; gBufY = y;
   gBuf.createSprite(w, h);
   gBufAlive = true;
 }
@@ -113,7 +119,7 @@ static inline int gfxBufTextWidth(GfxFont f, const String& s) {
   return gBuf.textWidth(s);
 }
 
-static inline void gfxBufPush(int x, int y) { gBuf.pushSprite(x, y); }
+static inline void gfxBufPush() { gBuf.pushSprite(gBufX, gBufY); }
 static inline void gfxBufEnd() {
   if (gBufAlive) { gBuf.deleteSprite(); gBufAlive = false; }
 }

@@ -22,8 +22,15 @@
      what that is on its panel. On a 480x320 screen those are simply larger.
 
    The offscreen buffer (gfxBuf*) is how a row gets drawn without flicker. On the
-   CYD that is a TFT_eSPI sprite; on the S3 an Arduino_Canvas. One buffer at a
-   time is all the sketch ever needs.
+   CYD that is a TFT_eSPI sprite; on the S3 the whole screen is already a canvas,
+   so there it is only a coordinate shift. Hence gfxBufBegin() takes the spot on
+   screen it will end up in: the S3 needs it up front, and the CYD does not mind
+   being told early. One buffer at a time is all the sketch ever needs.
+
+   gfxFlushNow() is the other thing the two panels disagree about. On the CYD a
+   draw call lands on the glass immediately; the S3 shows nothing until its frame
+   is pushed. So the sketch says when a frame is done, and on the CYD that call
+   compiles away to nothing.
    =========================================================================== */
 #ifndef GFX_H
 #define GFX_H

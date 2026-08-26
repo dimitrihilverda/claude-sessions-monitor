@@ -614,6 +614,12 @@ void serialPump() {
       if (serBlock.length() < 2048) { serBlock += l; serBlock += "\n"; }
     }
     else if (l.startsWith("@REPLY ")) { serReply = l.substring(7); serHaveReply = true; }
+    /* Answer a direct question about the firmware. The announcement above only
+       fires on the first block after a gap, which covers a display that has just
+       been plugged in and does nothing for the case that matters as much: the PC
+       service restarting. The payload on this side is still fresh then, so
+       nothing is announced and the About box cannot say what is running. */
+    else if (l == "?FW") { Serial.println(String("@FW ") + FW_VERSION); }
   }
 }
 

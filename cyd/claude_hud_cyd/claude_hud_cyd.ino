@@ -28,9 +28,10 @@
 #include <WebServer.h>
 #include <DNSServer.h>
 
-#include <TFT_eSPI.h>
-#include <SPI.h>
-#include <XPT2046_Touchscreen.h>
+/* The panel and the touch controller live behind gfx.h, so this file has no
+   opinion about which board it is running on. Set BOARD_KIND at compile time to
+   pick a backend; it defaults to the CYD. */
+#include "gfx.h"
 
 /* ---- SETTINGS --------------------------------------------------------------
    You do NOT need to fill in Wi-Fi or the PC address here. You set those on
@@ -58,7 +59,12 @@ const char* API_TOKEN = "";            // only fill this in if you set a token i
    Deliberately free of spaces: it travels as a query parameter and as a serial
    line, and a space in either is one more thing to get wrong. */
 #ifndef FW_VERSION
-#define FW_VERSION "local-" __DATE__
+/* A local build has no CI string. Just "local", not "local-" __DATE__: that date
+   contains spaces, and this value travels as a query parameter and as a serial
+   line where the parser stops at the first one -- it arrived as "local-Aug".
+   The compile date is on the BUILD line anyway, which is where you look to tell
+   two local builds apart. */
+#define FW_VERSION "local"
 #endif
 
 // The network you configure it over. Password-protected on purpose: on an open
@@ -74,15 +80,6 @@ const uint32_t POLL_MS_OFF   = 1200;
 const uint8_t  BACKLIGHT_PCT = 70;     // brightness 0-100
 const bool     BEEP_ENABLED  = true;   // beep on a new attention request
 #define USE_RGB_LED   1                // the status LED on the board itself
-#define TOUCH_DEBUG   0                // 1 = raw touch values to Serial, for calibrating
-
-// Touch calibration. If taps land somewhere other than where you press, set
-// TOUCH_DEBUG to 1, tap the four corners and put the extremes here.
-int TS_MINX = 200, TS_MAXX = 3700;
-int TS_MINY = 240, TS_MAXY = 3800;
-#define TOUCH_SWAP_XY  1
-#define TOUCH_FLIP_X   0
-#define TOUCH_FLIP_Y   1
 
 // ---- hardware --------------------------------------------------------------
 #define PIN_BL     21     // backlight
@@ -94,13 +91,6 @@ int TS_MINY = 240, TS_MAXY = 3800;
 #define PIN_LED_R   4
 #define PIN_LED_G  16
 #define PIN_LED_B  17
-
-// Touch sits on a second SPI bus
-#define TP_CLK  25
-#define TP_MISO 39
-#define TP_MOSI 32
-#define TP_CS   33
-#define TP_IRQ  36
 
 /* The three buttons. GPIO 22 and 27 come out on the JST connectors and have an
    internal pull-up: switch between the pin and GND, done.
@@ -153,12 +143,12 @@ uint16_t blend565(uint16_t fg, uint16_t bg, uint8_t alpha) {
   return (r << 11) | (g << 5) | b;
 }
 
-TFT_eSPI    tft = TFT_eSPI();
-TFT_eSprite row = TFT_eSprite(&tft);
-SPIClass    tpSPI(VSPI);
-XPT2046_Touchscreen ts(TP_CS, TP_IRQ);
-
-// ---- layout ----------------------------------------------------------------
+/* ---- layout ----------------------------------------------------------------
+   Derived from the panel rather than hardcoded, so a 480x320 board gets wider
+   rows and a wider button bar without a second set of numbers to keep in step.
+   Only the heights are fixed: they are set by how tall the type is. */
+#define SCR_W     (gfxWidth())
+#define SCR_H     (gfxHeight())
 #define HDR_H     28
 #define ROW_Y     30
 #define ROW_H     41
@@ -340,28 +330,25 @@ void say(const String& msg) {          // short message in the header line
 void drawHeader() {
   bool alarm = (nAtt > 0);
   uint16_t bg = alarm ? COL_ORANGE : COL_HDR;
-  tft.fillRect(0, 0, 320, HDR_H, bg);
-  tft.setTextFont(2);
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(alarm ? COL_BG : COL_TXT, bg);
+  uint16_t ink = alarm ? COL_BG : COL_TXT;
+  gfxFillRect(0, 0, SCR_W, HDR_H, bg);
 
   /* Offline the display has to say it itself; online the PC supplies the whole
      sentence already composed, because only there is it known whether it should
      read "1 needs you" or "2 need you" -- and in which language. */
-  tft.drawString(online ? uiHeader : String(TXT_OFFLINE), 10, 5);
+  gfxText(GF_SMALL, GA_TL, 10, 5, online ? uiHeader : String(TXT_OFFLINE), ink, bg);
 
-  tft.setTextDatum(TR_DATUM);
   String right = (millis() < toastUntil) ? toast : clockTxt;
-  tft.drawString(right, 310, 5);
+  gfxText(GF_SMALL, GA_TR, SCR_W - 10, 5, right, ink, bg);
+
   /* Say which pipe the data came in over. Without it "it works" and "it works
      over the cable" look identical, and that is exactly what you want to know
      when the network is the thing you are unsure about. */
   if (serialFresh()) {
-    tft.setTextColor(alarm ? COL_BG : COL_GREEN, bg);
-    tft.drawString("USB", 310 - tft.textWidth(right) - 10, 5);
+    gfxText(GF_SMALL, GA_TR, SCR_W - 20 - gfxTextWidth(GF_SMALL, right), 5,
+            "USB", alarm ? COL_BG : COL_GREEN, bg);
   }
-  tft.setTextDatum(TL_DATUM);
-  tft.drawFastHLine(0, HDR_H, 320, COL_LINE);
+  gfxDrawHLine(0, HDR_H, SCR_W, COL_LINE);
 }
 
 /* i is the slot on screen, not the session. With scrolling those stopped being
@@ -370,68 +357,56 @@ void drawHeader() {
 void drawRow(int i) {
   int y = ROW_Y + i * ROW_H;
   int r = scrollTop + i;
-  row.createSprite(320, ROW_H - 3);
-  row.fillSprite(COL_BG);
+  const int RW = SCR_W - 12;              // row surface, 6 px margin either side
+  gfxBufBegin(SCR_W, ROW_H - 3);
+  gfxBufFill(COL_BG);
 
   if (r < nRows) {
     bool sel = (r == selIdx);
     uint16_t c = stateColor(rows[r].state);
+    uint16_t rowBg = sel ? COL_SEL : COL_ROW;
     /* The stripe on the left says WHAT the session is doing, the lighter surface
        says which row is selected -- two separate signals, no extra outline. */
-    row.fillRoundRect(6, 0, 308, ROW_H - 3, 6, sel ? COL_SEL : COL_ROW);
-    row.fillRect(6, 0, 3, ROW_H - 3, c);
+    gfxBufRoundRect(6, 0, RW, ROW_H - 3, 6, rowBg);
+    gfxBufRect(6, 0, 3, ROW_H - 3, c);
 
     // Short names large, longer titles a size smaller: since the beacon started
     // sending the real session title, those names are much longer than a folder name.
     String nm = rows[r].name;
-    row.setTextColor(COL_TXT, sel ? COL_SEL : COL_ROW);
     if (nm.length() <= 16) {
-      row.setTextFont(4);
-      row.drawString(nm, 16, 2);
+      gfxBufText(GF_BIG, GA_TL, 16, 2, nm, COL_TXT, rowBg);
     } else {
-      row.setTextFont(2);
       if (nm.length() > 34) nm = nm.substring(0, 33) + ".";
-      row.drawString(nm, 16, 4);
+      gfxBufText(GF_SMALL, GA_TL, 16, 4, nm, COL_TXT, rowBg);
     }
 
     /* State chip, just like Draw-Chip in hud.ps1: fill in the state colour at
        alpha 38 over the row, border at 150, text in the full colour. That is
        where the green (and the orange, on attention) really shows. */
-    uint16_t rowBg = sel ? COL_SEL : COL_ROW;
     uint16_t chipBg = blend565(c, rowBg, 38);
-    row.setTextFont(2);
     String lbl = stateLabel(rows[r].state);
-    int cw = row.textWidth(lbl) + 14, ch = 17;
-    int cx = 306 - cw, cy = 3;
-    row.fillRoundRect(cx, cy, cw, ch, 4, chipBg);
-    row.drawRoundRect(cx, cy, cw, ch, 4, blend565(c, rowBg, 150));
-    row.setTextColor(c, chipBg);
-    row.setTextDatum(MC_DATUM);
-    row.drawString(lbl, cx + cw / 2, cy + ch / 2);
-    row.setTextDatum(TL_DATUM);
+    int cw = gfxBufTextWidth(GF_SMALL, lbl) + 14, ch = 17;
+    int cx = SCR_W - 14 - cw, cy = 3;
+    gfxBufRoundRect(cx, cy, cw, ch, 4, chipBg);
+    gfxBufDrawRoundRect(cx, cy, cw, ch, 4, blend565(c, rowBg, 150));
+    gfxBufText(GF_SMALL, GA_MC, cx + cw / 2, cy + ch / 2, lbl, c, chipBg);
 
-    row.setTextColor(COL_MUTED, sel ? COL_SEL : COL_ROW);
     String w = rows[r].since + "  " + rows[r].why;
     if (w.length() > 52) w = w.substring(0, 51) + ".";
-    row.drawString(w, 16, 23);
+    gfxBufText(GF_SMALL, GA_TL, 16, 23, w, COL_MUTED, rowBg);
   } else if (r == 0) {
-    row.setTextFont(2);
-    row.setTextColor(COL_MUTED, COL_BG);
     if (online) {
-      row.drawString(uiEmpty, 16, 10);
+      gfxBufText(GF_SMALL, GA_TL, 16, 10, uiEmpty, COL_MUTED, COL_BG);
     } else {
       /* Name the address it is trying. A typo in the PC address is otherwise
          impossible to find: Wi-Fi works, so the portal never appears by itself,
          and the screen only said "waiting for the PC" without saying for what. */
-      row.setTextColor(COL_ORANGE, COL_BG);
-      row.drawString(String(TXT_NOANSWER) + cfgHost + ":" + cfgPort, 16, 3);
-      row.setTextColor(COL_MUTED, COL_BG);
-      row.drawString(TXT_CHECKAPI, 16, 21);
+      gfxBufText(GF_SMALL, GA_TL, 16, 3,
+                 String(TXT_NOANSWER) + cfgHost + ":" + cfgPort, COL_ORANGE, COL_BG);
+      gfxBufText(GF_SMALL, GA_TL, 16, 21, TXT_CHECKAPI, COL_MUTED, COL_BG);
     }
   } else if (r == 1 && !online && !nRows) {
-    row.setTextFont(2);
-    row.setTextColor(COL_MUTED, COL_BG);
-    row.drawString(TXT_HOLDSETUP, 16, 10);
+    gfxBufText(GF_SMALL, GA_TL, 16, 10, TXT_HOLDSETUP, COL_MUTED, COL_BG);
   }
 
   /* A hairline on the right edge showing where you are. Three pixels wide, but it
@@ -442,15 +417,15 @@ void drawRow(int i) {
     if (dik < 8) dik = 8;
     int top  = (scrollMax() > 0) ? ((hoog - dik) * scrollTop) / scrollMax() : 0;
     int mijn = y - ROW_Y;                       // where this slot sits in the list
-    row.fillRect(316, 0, 3, ROW_H - 3, COL_ROW);
+    gfxBufRect(SCR_W - 4, 0, 3, ROW_H - 3, COL_ROW);
     for (int k = 0; k < ROW_H - 3; k++) {
       int abs = mijn + k;
-      if (abs >= top && abs < top + dik) row.drawFastHLine(316, k, 3, COL_MUTED);
+      if (abs >= top && abs < top + dik) gfxBufHLine(SCR_W - 4, k, 3, COL_MUTED);
     }
   }
 
-  row.pushSprite(0, y);
-  row.deleteSprite();
+  gfxBufPush(0, y);
+  gfxBufEnd();
 }
 
 /* One source for the position of button i, so the drawn surface and the hit
@@ -497,16 +472,16 @@ void drawArrows(bool flashUp, bool flashDown) {
     int  bx  = x + k * half;
     uint16_t vlak = aan ? COL_GREEN : COL_ROW;
     uint16_t ink  = aan ? COL_BG : (scrollable() ? COL_TXT : COL_MUTED);
-    tft.fillRoundRect(bx + 1, BAR_Y, half - 2, h, 6, vlak);
-    tft.drawRoundRect(bx + 1, BAR_Y, half - 2, h, 6, aan ? COL_GREEN : COL_LINE);
+    gfxFillRoundRect(bx + 1, BAR_Y, half - 2, h, 6, vlak);
+    gfxDrawRoundRect(bx + 1, BAR_Y, half - 2, h, 6, aan ? COL_GREEN : COL_LINE);
 
     // grey out the end of the road, so you can see there is nothing further
     if (k == 0 && scrollTop <= 0)           ink = COL_LINE;
     if (k == 1 && scrollTop >= scrollMax()) ink = COL_LINE;
 
     int cx = bx + half / 2, cy = BAR_Y + h / 2, s = 6;
-    if (k == 0) tft.fillTriangle(cx, cy - s, cx - s, cy + s, cx + s, cy + s, ink);
-    else        tft.fillTriangle(cx, cy + s, cx - s, cy - s, cx + s, cy - s, ink);
+    if (k == 0) gfxFillTriangle(cx, cy - s, cx - s, cy + s, cx + s, cy + s, ink);
+    else        gfxFillTriangle(cx, cy + s, cx - s, cy - s, cx + s, cy - s, ink);
   }
 }
 
@@ -515,17 +490,13 @@ void drawButton(int i, bool pressed) {
   btnRect(i, x, w);
   uint16_t vlak = pressed ? COL_GREEN : COL_ROW;
   uint16_t ink  = pressed ? COL_BG    : COL_TXT;
-  tft.fillRoundRect(x, BAR_Y, w, BAR_H - 6, 6, vlak);
+  gfxFillRoundRect(x, BAR_Y, w, BAR_H - 6, 6, vlak);
   // The row surface sits close to the background, so without a border you would
   // not see that these are buttons.
-  tft.drawRoundRect(x, BAR_Y, w, BAR_H - 6, 6, pressed ? COL_GREEN : COL_LINE);
-  tft.setTextFont(2);
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(ink, vlak);
+  gfxDrawRoundRect(x, BAR_Y, w, BAR_H - 6, 6, pressed ? COL_GREEN : COL_LINE);
   String l = btnLabel[i];
   if (l.length() > 13) l = l.substring(0, 12) + ".";
-  tft.drawString(l, x + w / 2, BAR_Y + (BAR_H - 6) / 2);
-  tft.setTextDatum(TL_DATUM);
+  gfxText(GF_SMALL, GA_MC, x + w / 2, BAR_Y + (BAR_H - 6) / 2, l, ink, vlak);
 }
 
 void scrollBy(int delta, bool wrap) {
@@ -557,8 +528,8 @@ void flashButton(int i) {
 }
 
 void drawButtonBar() {
-  tft.fillRect(0, BAR_Y - 4, 320, 244 - BAR_Y, COL_BG);
-  tft.drawFastHLine(0, BAR_Y - 4, 320, COL_LINE);
+  gfxFillRect(0, BAR_Y - 4, SCR_W, SCR_H - (BAR_Y - 4), COL_BG);
+  gfxDrawHLine(0, BAR_Y - 4, SCR_W, COL_LINE);
   int n = scrollable() ? 2 : 3;
   for (int i = 0; i < n; i++) drawButton(i, i == btnFlash);
   if (scrollable()) drawArrows(btnFlash == HIT_UP, btnFlash == HIT_DOWN);
@@ -569,33 +540,31 @@ void drawButtonBar() {
    pogingnummer en hoe lang er al geen contact is. Zo zie je dat hij bezig is in
    plaats van een stilstaande foutmelding. */
 void drawRetry() {
-  /* Op de plek van de derde rij: rij 1 draagt de "houd de bovenbalk vast"-hint,
-     en die zou anders vijf keer per seconde worden weggeveegd. */
+  /* In the third row's place: row 1 carries the "hold the top bar" hint, and that
+     would otherwise be wiped five times a second. */
   const int Y = ROW_Y + 2 * ROW_H + 2;
+  const int RW = SCR_W - 12;
   uint32_t interval = POLL_MS_OFF;
   uint32_t sinds    = millis() - lastPoll;
   if (sinds > interval) sinds = interval;
 
-  // voortgangsbalkje naar de volgende poging
-  int vol = (int)((uint32_t)308 * sinds / interval);
-  row.createSprite(320, 22);
-  row.fillSprite(COL_BG);
-  row.fillRect(6, 0, 308, 3, COL_ROW);
-  row.fillRect(6, 0, vol, 3, COL_ORANGE);
+  // a bar filling towards the next attempt
+  int vol = (int)((uint32_t)RW * sinds / interval);
+  gfxBufBegin(SCR_W, 22);
+  gfxBufFill(COL_BG);
+  gfxBufRect(6, 0, RW, 3, COL_ROW);
+  gfxBufRect(6, 0, vol, 3, COL_ORANGE);
 
-  row.setTextFont(2);
-  row.setTextDatum(TL_DATUM);
-  row.setTextColor(COL_MUTED, COL_BG);
-  /* De RSSI staat erbij omdat dit meestal geen storing in de software is maar
-     bereik. Zie je hier -75 dBm of lager, dan is het schermpje te ver van je
-     accesspoint en helpt geen enkele instelling. */
+  /* The RSSI is here because this is usually range rather than a fault in the
+     software. At -75 dBm or lower the display is too far from your access point
+     and no setting will fix it. */
   uint32_t weg = (millis() - lastOkMs) / 1000;
   String s = String(TXT_RETRY) + pollFails + "  -  " + weg + TXT_AGO;
   if (WiFi.status() == WL_CONNECTED) s += "  -  " + String(WiFi.RSSI()) + " dBm";
   else                               s += "  -  no wifi";
-  row.drawString(s, 16, 7);
-  row.pushSprite(0, Y);
-  row.deleteSprite();
+  gfxBufText(GF_SMALL, GA_TL, 16, 7, s, COL_MUTED, COL_BG);
+  gfxBufPush(0, Y);
+  gfxBufEnd();
 }
 
 void drawAll() {
@@ -606,8 +575,8 @@ void drawAll() {
 
 void flashAttention() {
   for (int k = 0; k < 3; k++) {
-    tft.fillRect(0, 0, 320, HDR_H, COL_ORANGE); delay(120);
-    tft.fillRect(0, 0, 320, HDR_H, COL_BG);     delay(120);
+    gfxFillRect(0, 0, SCR_W, HDR_H, COL_ORANGE); delay(120);
+    gfxFillRect(0, 0, SCR_W, HDR_H, COL_BG);     delay(120);
   }
   drawHeader();
 }
@@ -883,29 +852,9 @@ bool poll() {
 
 // ---- touch -----------------------------------------------------------------
 bool readTouch(int& sx, int& sy) {
-  if (!ts.tirqTouched() || !ts.touched()) return false;
-  TS_Point p = ts.getPoint();
-
-  int a = p.x, b = p.y;
-#if TOUCH_SWAP_XY
-  int t = a; a = b; b = t;
-#endif
-  sx = map(a, TS_MINX, TS_MAXX, 0, 320);
-  sy = map(b, TS_MINY, TS_MAXY, 0, 240);
-#if TOUCH_FLIP_X
-  sx = 320 - sx;
-#endif
-#if TOUCH_FLIP_Y
-  sy = 240 - sy;
-#endif
-  sx = constrain(sx, 0, 319);
-  sy = constrain(sy, 0, 239);
-
-#if TOUCH_DEBUG
-  Serial.printf("raw x=%d y=%d z=%d  ->  x=%d y=%d\n", p.x, p.y, p.z, sx, sy);
-  tft.fillCircle(sx, sy, 3, COL_ORANGE);
-#endif
-  return true;
+  // The mapping itself lives in the backend: which axes to swap and which way
+  // round the glass sits is a property of the panel, not of this sketch.
+  return gfxTouchPoint(sx, sy);
 }
 
 void handleTouch() {
@@ -923,7 +872,7 @@ void handleTouch() {
      flash mode. */
   if (y < HDR_H) {
     uint32_t neer = millis();
-    while (ts.touched() && millis() - neer < 2200) delay(50);
+    while (gfxTouched() && millis() - neer < 2200) delay(50);
     if (millis() - neer >= 2000) {
       say(TXT_SETUP);
       drawHeader();
@@ -1049,31 +998,14 @@ void bewaarInstellingen(const String& ssid, const String& pass,
 // ---- portal ----------------------------------------------------------------
 // what the display shows while the portal is open
 void portaalToon() {
-  tft.fillScreen(COL_BG);
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextFont(4);
-  tft.setTextColor(COL_ORANGE, COL_BG);
-  tft.drawString("Instellen", 14, 12);
-
-  tft.setTextFont(2);
-  tft.setTextColor(COL_MUTED, COL_BG);
-  tft.drawString("Verbind je telefoon met dit wifi-netwerk:", 14, 52);
-  tft.setTextColor(COL_TXT, COL_BG);
-  tft.setTextFont(4);
-  tft.drawString(PORTAAL_SSID, 14, 72);
-  tft.setTextFont(2);
-  tft.setTextColor(COL_MUTED, COL_BG);
-  tft.drawString(String("wachtwoord: ") + PORTAAL_PASS, 14, 104);
-
-  tft.setTextColor(COL_TXT, COL_BG);
-  tft.drawString("Springt er geen pagina open, ga dan naar:", 14, 136);
-  tft.setTextFont(4);
-  tft.setTextColor(COL_GREEN, COL_BG);
-  tft.drawString(WiFi.softAPIP().toString(), 14, 156);
-
-  tft.setTextFont(2);
-  tft.setTextColor(COL_MUTED, COL_BG);
-  tft.drawString("Na opslaan herstart hij zelf.", 14, 200);
+  gfxFillScreen(COL_BG);
+  gfxText(GF_BIG,   GA_TL, 14,  12, "Instellen", COL_ORANGE, COL_BG);
+  gfxText(GF_SMALL, GA_TL, 14,  52, "Verbind je telefoon met dit wifi-netwerk:", COL_MUTED, COL_BG);
+  gfxText(GF_BIG,   GA_TL, 14,  72, PORTAAL_SSID, COL_TXT, COL_BG);
+  gfxText(GF_SMALL, GA_TL, 14, 104, String("wachtwoord: ") + PORTAAL_PASS, COL_MUTED, COL_BG);
+  gfxText(GF_SMALL, GA_TL, 14, 136, "Springt er geen pagina open, ga dan naar:", COL_TXT, COL_BG);
+  gfxText(GF_BIG,   GA_TL, 14, 156, WiFi.softAPIP().toString(), COL_GREEN, COL_BG);
+  gfxText(GF_SMALL, GA_TL, 14, 200, "Na opslaan herstart hij zelf.", COL_MUTED, COL_BG);
 }
 
 static String htmlVeilig(const String& in) {
@@ -1233,7 +1165,13 @@ void bewaakWifi() {
   delay(200);
 }
 
-// ---- cracktro --------------------------------------------------------------
+/* ---- cracktro --------------------------------------------------------------
+   CYD only, and deliberately so. The copper banding on the logo is done with
+   setViewport as a clip, which Arduino_GFX has no equivalent for, and an easter
+   egg is not what should shape the drawing interface. So this one reaches past
+   gfx.h and talks to TFT_eSPI directly.
+   ---------------------------------------------------------------------------- */
+#if BOARD_KIND == BOARD_CYD
 /* A nod to the intros of 1992. Back out: touch the screen or press any button.
 
    Starting it: the HUD's right-click menu, or GET /demo on the PC. The command
@@ -1274,8 +1212,8 @@ void cracktro() {
   bool startDown[8];
   for (int i = 0; i < N_BTN; i++) startDown[i] = (digitalRead(BUTTONS[i].pin) == LOW);
 
-  tft.fillScreen(TFT_BLACK);
-  tft.setViewport(0, 0, 320, 240);
+  gTft.fillScreen(TFT_BLACK);
+  gTft.setViewport(0, 0, 320, 240);
 
   const int N_STAR = 54;
   Star st[N_STAR];
@@ -1300,13 +1238,13 @@ void cracktro() {
   }
 
   const int LOGO_Y = 44, LOGO_H = 32, COP_Y = 96, COP_H = 44;
-  const int SCR_Y = 182, SCR_H = 56, GOLF = 14;
+  const int SCROLL_Y = 182, SCROLL_H = 56, GOLF = 14;
 
-  TFT_eSprite scr = TFT_eSprite(&tft);
+  TFT_eSprite scr = TFT_eSprite(&gTft);
   scr.setColorDepth(16);
   /* 46 tall, not 26: font 4 is 26 pixels by itself, and the swing of the wave
      comes on top of that. At 26 the letters were cut off at the bottom. */
-  scr.createSprite(320, SCR_H);
+  scr.createSprite(320, SCROLL_H);
   int scrollX = 320;
   uint32_t frame = 0, t0 = millis();
   int noot = -1;
@@ -1317,7 +1255,7 @@ void cracktro() {
        low right now" was wrong: GPIO35 has no internal pull-up, so with no
        10k resistor fitted it floats and reads low at random -- which dropped
        straight back out of the cracktro on the first pass through this loop. */
-    if (ts.touched()) { Serial.println("cracktro: touch"); break; }
+    if (gfxTouched()) { Serial.println("cracktro: touch"); break; }
     bool weg = false;
     for (int i = 0; i < N_BTN; i++) {
       bool nu = (digitalRead(BUTTONS[i].pin) == LOW);
@@ -1328,19 +1266,19 @@ void cracktro() {
 
     // ---- stars -----------------------------------------------------------
     for (int i = 0; i < N_STAR; i++) {
-      tft.drawPixel(st[i].x, st[i].y, TFT_BLACK);        // erase the old one
+      gTft.drawPixel(st[i].x, st[i].y, TFT_BLACK);        // erase the old one
       st[i].x -= snelheid[st[i].laag];
       if (st[i].x < 0) { st[i].x = 319; st[i].y = random(240); }
       // do not draw stars over the logo and the scroller
       bool bedekt = (st[i].y >= LOGO_Y && st[i].y < COP_Y + COP_H) ||
-                    (st[i].y >= SCR_Y && st[i].y < SCR_Y + SCR_H);
-      if (!bedekt) tft.drawPixel(st[i].x, st[i].y, sterKleur[st[i].laag]);
+                    (st[i].y >= SCROLL_Y && st[i].y < SCROLL_Y + SCROLL_H);
+      if (!bedekt) gTft.drawPixel(st[i].x, st[i].y, sterKleur[st[i].laag]);
     }
 
     // ---- copper bars -----------------------------------------------------
     for (int y = 0; y < COP_H; y++) {
       int idx = (int)((y + frame / 2)) % N_COP;
-      tft.drawFastHLine(0, COP_Y + y, 320, cop[idx]);
+      gTft.drawFastHLine(0, COP_Y + y, 320, cop[idx]);
     }
 
     // ---- logo with copper banding ----------------------------------------
@@ -1348,17 +1286,17 @@ void cracktro() {
        as a clip, each band in a different copper colour. Eight drawString
        calls, instead of reading and rewriting 7200 pixels. */
     int bob = (int)(sin(frame * 0.06f) * 5.0f);
-    tft.fillRect(0, LOGO_Y - 6, 320, LOGO_H + 12, TFT_BLACK);
+    gTft.fillRect(0, LOGO_Y - 6, 320, LOGO_H + 12, TFT_BLACK);
     const int BAND = 4;
     for (int b = 0; b < LOGO_H; b += BAND) {
-      tft.setViewport(0, LOGO_Y + bob + b, 320, BAND);
-      tft.setTextDatum(TC_DATUM);
-      tft.setTextFont(4);
-      tft.setTextColor(cop[((b / BAND) + frame / 3) % N_COP]);
-      tft.drawString("CLAUDE DECK", 160, -b);      // negative y = shift upwards
-      tft.setTextDatum(TL_DATUM);
+      gTft.setViewport(0, LOGO_Y + bob + b, 320, BAND);
+      gTft.setTextDatum(TC_DATUM);
+      gTft.setTextFont(4);
+      gTft.setTextColor(cop[((b / BAND) + frame / 3) % N_COP]);
+      gTft.drawString("CLAUDE DECK", 160, -b);      // negative y = shift upwards
+      gTft.setTextDatum(TL_DATUM);
     }
-    tft.resetViewport();
+    gTft.resetViewport();
 
     // ---- waving scroller --------------------------------------------------
     scr.fillSprite(TFT_BLACK);
@@ -1383,11 +1321,11 @@ void cracktro() {
         const float K = 0.0295f;                  // 1.5 * 2*PI / 320
         int golf = (int)(cos((320 - x) * K) * (float)GOLF);
         scr.setTextColor(cop[(int)((x / 8) + frame / 2) % N_COP]);
-        scr.drawString(c, x, (SCR_H / 2) - 13 + golf);
+        scr.drawString(c, x, (SCROLL_H / 2) - 13 + golf);
       }
       x += w;
     }
-    scr.pushSprite(0, SCR_Y);
+    scr.pushSprite(0, SCROLL_Y);
     scrollX -= 3;
     if (x < 0) scrollX = 320;                       // wrap around as soon as everything has passed
 
@@ -1419,20 +1357,28 @@ void cracktro() {
 #endif
   Serial.println("cracktro: end");
   scr.deleteSprite();
-  tft.resetViewport();
-  while (ts.touched()) delay(20);       // finger off the glass before we carry on
+  gTft.resetViewport();
+  while (gfxTouched()) delay(20);       // finger off the glass before we carry on
   lastTouch = millis();
-  tft.fillScreen(COL_BG);
+  gTft.fillScreen(COL_BG);
   fingerprint = "";                     // the next poll repaints everything
   drawAll();
 }
+
+#else
+/* Other panels get a cracktro that does nothing, so the call sites need no
+   guards of their own. */
+void cracktro() { }
+#endif  // BOARD_KIND == BOARD_CYD
 
 // ---- setup / loop ----------------------------------------------------------
 void setup() {
   Serial.begin(115200);
   delay(200);
-  Serial.printf("BUILD %s %s  COL_BG=0x%04X COL_ROW=0x%04X COL_SEL=0x%04X\n",
-                __DATE__, __TIME__, COL_BG, COL_ROW, COL_SEL);
+  /* Version first, because that is the one you compare against what is
+     published; the compile date is only there to tell two local builds apart. */
+  Serial.printf("BUILD %s  (%s %s)  panel %dx%d\n",
+                FW_VERSION, __DATE__, __TIME__, gfxWidth(), gfxHeight());
   setBacklight(BACKLIGHT_PCT);
 
 #if USE_RGB_LED
@@ -1445,20 +1391,12 @@ void setup() {
     btnWas[i] = false; btnAt[i] = 0;
   }
 
-  tft.init();
-  tft.setRotation(1);            // landscape, USB on the left
+  gfxBegin();
+  gfxFillScreen(COL_BG);
+  gfxText(GF_BIG,   GA_TL, 12, 20, "Claude-sessies", COL_TXT, COL_BG);
+  gfxText(GF_SMALL, GA_TL, 12, 60, "verbinden met wifi...", COL_MUTED, COL_BG);
 
-  tft.fillScreen(COL_BG);
-  tft.setTextFont(4);
-  tft.setTextColor(COL_TXT, COL_BG);
-  tft.drawString("Claude-sessies", 12, 20);
-  tft.setTextFont(2);
-  tft.setTextColor(COL_MUTED, COL_BG);
-  tft.drawString("verbinden met wifi...", 12, 60);
-
-  tpSPI.begin(TP_CLK, TP_MISO, TP_MOSI, TP_CS);
-  ts.begin(tpSPI);
-  ts.setRotation(0);   // raw orientation: we do the rotating ourselves with TOUCH_SWAP/FLIP
+  gfxTouchBegin();
 
   leesInstellingen();
 
@@ -1468,9 +1406,7 @@ void setup() {
      twenty seconds failing to connect and then sit in the setup portal, while a
      cable capable of carrying the whole payload was plugged in the entire time.
      A little over one push interval is enough to be sure. */
-  tft.setTextFont(2);
-  tft.setTextColor(COL_MUTED, COL_BG);
-  tft.drawString("checking USB...", 12, 82);
+  gfxText(GF_SMALL, GA_TL, 12, 82, "checking USB...", COL_MUTED, COL_BG);
   uint32_t tSer = millis();
   while (millis() - tSer < 4000 && !serialFresh()) { serialPump(); delay(20); }
 
@@ -1502,7 +1438,7 @@ void setup() {
     if (WiFi.status() == WL_CONNECTED) wifiVerbonden();
   }
 
-  tft.fillScreen(COL_BG);
+  gfxFillScreen(COL_BG);
   drawAll();
 }
 

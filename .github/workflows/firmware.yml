@@ -49,10 +49,15 @@ jobs:
       - name: Compile
         run: |
           mkdir -p build
+          # The version goes into the firmware as well as the manifest, so the
+          # HUD can compare what is on the display with what is published.
+          version="$(date -u +%Y-%m-%d)-${GITHUB_SHA:0:7}"
+          echo "FW_VERSION=$version" >> "$GITHUB_ENV"
           arduino-cli compile \
             --fqbn esp32:esp32:esp32 \
             --output-dir build \
             --warnings all \
+            --build-property "compiler.cpp.extra_flags=-DFW_VERSION=\"$version\"" \
             cyd/claude_hud_cyd
 
       - name: Assemble the site
@@ -74,7 +79,7 @@ jobs:
           cp "$core_dir/tools/partitions/boot_app0.bin" _site/firmware/boot_app0.bin
           cp build/claude_hud_cyd.ino.bin            _site/firmware/app.bin
 
-          version="$(date -u +%Y-%m-%d) ${GITHUB_SHA:0:7}"
+          version="$FW_VERSION"
           cat > _site/manifest.json <<EOF
           {
             "name": "Claude Sessions Monitor (Cheap Yellow Display)",

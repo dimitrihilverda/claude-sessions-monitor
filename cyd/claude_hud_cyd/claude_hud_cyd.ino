@@ -49,6 +49,18 @@ const int   API_PORT_START  = 8787;
 
 const char* API_TOKEN = "";            // only fill this in if you set a token in actions.json
 
+/* The firmware version, so the PC can tell you when the display is behind.
+
+   CI passes the same string it puts in the flasher's manifest.json, which is what
+   makes the two comparable at all. A local build has no such string, so it falls
+   back to the compile date -- enough to see that it is not a CI build.
+
+   Deliberately free of spaces: it travels as a query parameter and as a serial
+   line, and a space in either is one more thing to get wrong. */
+#ifndef FW_VERSION
+#define FW_VERSION "local-" __DATE__
+#endif
+
 // The network you configure it over. Password-protected on purpose: on an open
 // network anyone nearby could overwrite your display's settings.
 const char* PORTAAL_SSID = "Claude-Deck";
@@ -643,7 +655,12 @@ void serialPump() {
         // Announce the first block, and any return after a gap. Without this the
         // cable is a black box: you cannot tell "not receiving" from "receiving
         // and ignoring", which are very different problems.
-        if (!serialFresh()) Serial.printf("serial: payload received (%u bytes)\n", (unsigned)serBlock.length());
+        if (!serialFresh()) {
+          Serial.printf("serial: payload received (%u bytes)\n", (unsigned)serBlock.length());
+          // Announce ourselves on the way in, so the PC knows which firmware
+          // is on the other end of the cable.
+          Serial.println(String("@FW ") + FW_VERSION);
+        }
         serPayload = serBlock;
         serAt = millis();
       }
@@ -769,7 +786,9 @@ bool poll() {
   serialPump();
   // Serial wins while it is fresh: it is the cheaper and more reliable of the
   // two, and on a blocked network it is the only one that works at all.
-  String body = serialFresh() ? serPayload : httpGet("/cyd.txt");
+  /* The version rides along on the poll. Over Wi-Fi that is the only chance the
+     PC gets to learn it, and it costs one query parameter. */
+  String body = serialFresh() ? serPayload : httpGet(String("/cyd.txt?fw=") + FW_VERSION);
   if (!body.length()) return false;
 
   int    n = 0, att = 0, act = 0, done = 0;

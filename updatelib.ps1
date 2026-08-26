@@ -162,3 +162,50 @@ function Invoke-DashUpdate {
         try { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue } catch { }
     }
 }
+
+$DashFlashPage = 'https://dimitrihilverda.github.io/claude-sessions-monitor/'
+
+<#
+  ---- the display's firmware -------------------------------------------------
+
+  Two questions, two sources. What is on the display comes from the web service,
+  which learns it from the display itself. What is published comes from the
+  flasher's manifest. CI writes the same string into both the firmware and that
+  manifest, which is the only reason they can be compared at all.
+
+  Neither call is allowed to matter much: no display and no network are both
+  perfectly normal, and the About box has to open regardless.
+#>
+function Get-DashDisplayInfo([int]$ApiPort = 8787) {
+    try {
+        return Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/display" -TimeoutSec 3 -ErrorAction Stop
+    } catch { return $null }
+}
+
+function Get-DashPublishedFirmware {
+    try {
+        try {
+            [Net.ServicePointManager]::SecurityProtocol =
+                [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        } catch { }
+        $m = Invoke-RestMethod -Uri ($DashFlashPage + 'manifest.json') `
+                 -Headers @{ 'User-Agent' = 'claude-sessions-monitor' } -TimeoutSec 8 -ErrorAction Stop
+        return [string]$m.version
+    } catch { return '' }
+}
+
+<#
+  Hand the COM port back before sending somebody to the flasher.
+
+  The web service holds it to feed the display over USB, and the browser cannot
+  take a port that is already open -- the flash would fail with a port error and
+  nothing on the page would explain why. Five minutes is enough to pick the port
+  and let it write; the bridge takes it back by itself afterwards.
+#>
+function Open-DashFlasher([int]$ApiPort = 8787) {
+    try {
+        Invoke-WebRequest -Uri "http://127.0.0.1:$ApiPort/serial/release?sec=300" `
+            -TimeoutSec 4 -UseBasicParsing | Out-Null
+    } catch { }
+    try { Start-Process $DashFlashPage } catch { }
+}

@@ -12,6 +12,7 @@
 #    GET /action?id=<sid>&b=N  run button action N (see actions.json)
 #    GET /                     a tiny status page (fine on a phone)
 #    GET /serial/release       let go of the USB port for a minute, to flash
+#    GET /display              which firmware the display reports, and when
 #
 #  Besides HTTP the same payload goes out over USB serial, so the display keeps
 #  working on a network that blocks the port. See the USB bridge below.
@@ -475,6 +476,28 @@ function Reset-SessieCache { $script:cacheAt = [datetime]::MinValue }
   channel came in over a physical cable plugged into this machine. Somebody who
   can do that has the keyboard anyway.
 #>
+<#
+  What firmware is on the display?
+
+  It tells us over whichever transport it is using: as a query parameter on its
+  poll over Wi-Fi, and as an @FW line over the cable. Wi-Fi is the case that
+  needs the parameter -- there is no other moment we get to ask.
+
+  The HUD compares this against the version in the flasher's manifest, which CI
+  writes from the same string. Without that shared string the two would not be
+  comparable, and "your display is behind" could not be said honestly.
+#>
+$script:fwVersion   = ''
+$script:fwSeenAt    = [datetime]::MinValue
+$script:fwTransport = ''
+
+function Set-DashDisplayFw([string]$v, [string]$via) {
+    if (-not $v) { return }
+    $script:fwVersion   = $v
+    $script:fwSeenAt    = [datetime]::UtcNow
+    $script:fwTransport = $via
+}
+
 $script:ser          = $null
 $script:serPortName  = ''
 $script:serLastPush  = [datetime]::MinValue
@@ -561,6 +584,7 @@ function Send-DashSerialLine([string]$line) {
 }
 
 function Invoke-DashSerialLine([string]$line) {
+    if ($line -match '^@FW\s+(\S+)') { Set-DashDisplayFw $Matches[1] 'usb'; return }
     $snap = Get-SessieCache
     if ($line -match '^@FOCUS\s+(\S+)') {
         Send-DashSerialLine ('@REPLY ' + (Invoke-DashTap -All $snap.all -Sid $Matches[1] -Kind 'focus' -Via 'USB'))
@@ -674,6 +698,23 @@ while ($true) {
         $ctype = 'text/plain; charset=utf-8'
 
         switch ($path) {
+            '/display' {
+                # What the HUD needs in order to say something honest about the
+                # display: which firmware, how long since we heard from it, over
+                # what, and which port we are holding.
+                $stil = -1
+                if ($script:fwSeenAt -ne [datetime]::MinValue) {
+                    $stil = [int](([datetime]::UtcNow - $script:fwSeenAt).TotalSeconds)
+                }
+                $body = @{
+                    firmware   = $script:fwVersion
+                    transport  = $script:fwTransport
+                    seenSecAgo = $stil
+                    serialPort = $script:serPortName
+                } | ConvertTo-Json -Compress
+                $ctype = 'application/json; charset=utf-8'
+            }
+
             '/serial/release' {
                 <#
                   Let go of the COM port so you can flash or open a serial
@@ -698,7 +739,11 @@ while ($true) {
                 $body = 'ok cracktro'
             }
 
-            '/cyd.txt'       { $body = Format-Cyd  $p }
+            '/cyd.txt' {
+                # The display sends its firmware version along on every poll.
+                if ($q['fw']) { Set-DashDisplayFw ([string]$q['fw']) 'wifi' }
+                $body = Format-Cyd $p
+            }
             '/sessions.json' { $body = ($p | ConvertTo-Json -Depth 6 -Compress); $ctype = 'application/json; charset=utf-8' }
 
             { $_ -eq '/focus' -or $_ -eq '/action' } {

@@ -404,7 +404,7 @@ function Show-DashAbout {
     $f.FormBorderStyle = 'FixedDialog'
     $f.MaximizeBox = $false; $f.MinimizeBox = $false
     $f.StartPosition = 'CenterScreen'
-    $f.ClientSize = New-Object System.Drawing.Size 420, 250
+    $f.ClientSize = New-Object System.Drawing.Size 440, 296
     $f.BackColor = $C.Bg
     $f.ForeColor = $C.Text
     $f.Font = New-Object System.Drawing.Font('Segoe UI', 9)
@@ -433,9 +433,14 @@ function Show-DashAbout {
     [void](Label $(if ($soort -eq 'git') { T 'about.kindGit' } else { T 'about.kindCopy' }) `
               20 154 380 $fKlein $C.Muted)
 
+    # ---- the display -------------------------------------------------------
+    [void](Label ((T 'about.display') + ':')  20 182 90 $f.Font $C.Muted)
+    $lblDisp = Label (T 'about.checking') 120 182 280 $f.Font $C.Muted
+
+
     $btnUpd = New-Object System.Windows.Forms.Button
     $btnUpd.Text = (T 'about.update')
-    $btnUpd.Location = New-Object System.Drawing.Point 20, 192
+    $btnUpd.Location = New-Object System.Drawing.Point 20, 232
     $btnUpd.Size = New-Object System.Drawing.Size 110, 30
     $btnUpd.Enabled = $false
     $btnUpd.FlatStyle = 'Flat'
@@ -444,17 +449,31 @@ function Show-DashAbout {
 
     $btnNew = New-Object System.Windows.Forms.Button
     $btnNew.Text = (T 'about.whatsNew')
-    $btnNew.Location = New-Object System.Drawing.Point 138, 192
+    $btnNew.Location = New-Object System.Drawing.Point 136, 232
     $btnNew.Size = New-Object System.Drawing.Size 110, 30
     $btnNew.Enabled = $false
     $btnNew.FlatStyle = 'Flat'
     $btnNew.BackColor = $C.Row; $btnNew.ForeColor = $C.Muted
     $f.Controls.Add($btnNew)
 
+    $btnFlash = New-Object System.Windows.Forms.Button
+    $btnFlash.Text = (T 'about.flash')
+    $btnFlash.Location = New-Object System.Drawing.Point 252, 232
+    $btnFlash.Size = New-Object System.Drawing.Size 130, 30
+    $btnFlash.FlatStyle = 'Flat'
+    $btnFlash.BackColor = $C.Row; $btnFlash.ForeColor = $C.Text
+    <#
+      Always available, not only when the firmware is behind: sometimes you
+      just want to reflash, and the useful part of this button is that it
+      frees the COM port first -- which is the step people forget.
+    #>
+    $btnFlash.Add_Click({ Open-DashFlasher $ApiPort })
+    $f.Controls.Add($btnFlash)
+
     $btnClose = New-Object System.Windows.Forms.Button
     $btnClose.Text = (T 'about.close')
-    $btnClose.Location = New-Object System.Drawing.Point 300, 192
-    $btnClose.Size = New-Object System.Drawing.Size 100, 30
+    $btnClose.Location = New-Object System.Drawing.Point 330, 232
+    $btnClose.Size = New-Object System.Drawing.Size 90, 30
     $btnClose.FlatStyle = 'Flat'
     $btnClose.BackColor = $C.Row; $btnClose.ForeColor = $C.Text
     $btnClose.Add_Click({ $f.Close() })
@@ -462,7 +481,7 @@ function Show-DashAbout {
 
     $link = New-Object System.Windows.Forms.LinkLabel
     $link.Text = (T 'about.repo')
-    $link.Location = New-Object System.Drawing.Point 20, 228
+    $link.Location = New-Object System.Drawing.Point 20, 270
     $link.Size = New-Object System.Drawing.Size 200, 18
     $link.Font = $fKlein
     $link.LinkColor = $C.Green; $link.BackColor = $C.Bg
@@ -503,6 +522,17 @@ function Show-DashAbout {
 
         $btnNew.Enabled = $true
         $btnNew.ForeColor = $C.Text
+
+        # ---- and what is on the display -----------------------------------
+        $d = Get-DashDisplayInfo $ApiPort
+        $pub = Get-DashPublishedFirmware
+        if (-not $d -or -not $d.firmware -or $d.seenSecAgo -lt 0 -or $d.seenSecAgo -gt 120) {
+            $lblDisp.Text = (T 'about.dispNone')
+        } else {
+            $achter = ($pub -and $d.firmware -ne $pub)
+            $lblDisp.Text = $d.firmware + '   ' + $(if ($achter) { T 'about.dispOld' } else { T 'about.dispCurrent' })
+            $lblDisp.ForeColor = $(if ($achter) { $C.Orange } else { $C.Green })
+        }
         $btnNew.Add_Click({ try { Start-Process $script:dashRel.Page } catch { } })
 
         if ($nieuwer) {

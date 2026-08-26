@@ -51,6 +51,7 @@ param(
 $ErrorActionPreference = 'Continue'
 
 $Root = $PSScriptRoot
+. (Join-Path $Root 'platformlib.ps1')
 . (Join-Path $Root 'sessionlib.ps1')
 . (Join-Path $Root 'focuslib.ps1')
 . (Join-Path $Root 'langlib.ps1')
@@ -508,21 +509,34 @@ $script:serPortsSeen = ''
 $script:serCh340     = ''
 
 <#
-  Which COM port is the display on?
+  Which port is the display on?
 
   By chip, never by number: this same board turned up as COM12 and later as
   COM16 on this machine, so a fixed name breaks the moment you replug it.
 
-  The catch is that the PnP query costs about a second, which is far too slow to
-  run in the service loop. GetPortNames() costs 10 ms, so that is the gate: only
-  when the set of ports actually changes do we pay for the lookup.
+  On Windows that means a PnP query for the CH340's vendor ID, and that query
+  costs about a second -- far too slow to run in the service loop. GetPortNames()
+  costs 10 ms, so that is the gate: only when the set of ports actually changes
+  do we pay for the lookup.
+
+  On macOS there is nothing to look up. The device name already says what it is
+  (cu.usbserial for the CH340, cu.usbmodem for the S3's native USB), so the
+  candidate list from platformlib is the answer. Note cu.* and not tty.*: opening
+  tty.* blocks until carrier detect, which for a board that is not asserting it
+  means hanging forever.
 #>
 function Find-DashSerialPort {
-    $namen = ''
-    try { $namen = ([System.IO.Ports.SerialPort]::GetPortNames() | Sort-Object) -join ',' } catch { return '' }
+    $kandidaten = @(Get-DashSerialCandidates)
+    $namen = ($kandidaten | Sort-Object) -join ','
     if ($namen -eq $script:serPortsSeen) { return $script:serCh340 }
     $script:serPortsSeen = $namen
     $script:serCh340 = ''
+
+    if (-not $DashOnWindows) {
+        if ($kandidaten.Count -gt 0) { $script:serCh340 = $kandidaten[0] }
+        return $script:serCh340
+    }
+
     try {
         $d = @(Get-CimInstance Win32_PnPEntity -ErrorAction Stop |
                Where-Object { $_.PNPDeviceID -match 'VID_1A86' -and $_.Name -match 'COM\d+' })
@@ -572,6 +586,14 @@ function Open-DashSerial {
         $script:serPortName = $poort
         $script:serLastPush = [datetime]::MinValue   # push straight away
         Write-DashLog "serial: attached to $poort"
+        <#
+          Ask what is on the other end, rather than waiting to be told. The
+          display announces itself when a payload arrives after a quiet spell,
+          which covers plugging it in but not restarting this service: the
+          payload over there is still fresh, so it stays quiet and /display has
+          nothing to report. Firmware that predates the question ignores it.
+        #>
+        try { $p.WriteLine('?FW') } catch { }
         return $true
     } catch {
         return $false

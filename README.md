@@ -55,6 +55,7 @@ blocks the port does not leave you with a blank screen.
 - [Security: read this before exposing the API](#security-read-this-before-exposing-the-api)
 - [Language](#language)
 - [Repository layout](#repository-layout)
+- [Running it on a Mac](#running-it-on-a-mac)
 - [Requirements](#requirements)
 - [Troubleshooting](#troubleshooting)
 - [What is deliberately not here](#what-is-deliberately-not-here)
@@ -302,6 +303,7 @@ wscript.exe hud.vbs
 |---|---|
 | `beacon.ps1`, `install-hooks.ps1` | the hooks that track session state |
 | `sessionlib.ps1`, `focuslib.ps1` | shared logic |
+| `platformlib.ps1` | the few things Windows and macOS do not share |
 | `langlib.ps1` | every user-visible string, in both languages |
 | `hud.ps1`, `hud.vbs` | the floating HUD |
 | `session-api.ps1`, `api.vbs`, `actions.json` | web service, and what the buttons do |
@@ -311,20 +313,72 @@ wscript.exe hud.vbs
 | `build-pakket.py` | builds `ClaudeDeck.zip`, the release package |
 | `web/` | the browser flasher, published to GitHub Pages by CI |
 | `diagnose.ps1` | checks hooks, files and processes when something is off |
+| `selftest.ps1` | checks whether this machine can run the PC side at all |
 | `README-sessions.md` | the full manual |
+
+## Running it on a Mac
+
+Most of this is portable and some of it is not, so here is the honest split.
+
+**Works:** the hooks, reading and pruning sessions, session titles from the
+transcript, the API, the status page in a browser, the display over Wi-Fi and
+over USB, and tapping a row to bring something to the front.
+
+**Does not:** the floating HUD. It is WinForms, which has no counterpart on
+macOS, and a second UI written in something else is a second UI to keep in step
+with the first. On a Mac you use the display, or open `http://localhost:8787/`.
+
+**Coarser:** tapping a row. On Windows the right *window* is picked by matching
+the session title against every open window's title — two projects in the same
+editor end up in the right one. On macOS there is no window list to score, so
+you get the right *application* and which tab is in front inside it is up to the
+application.
+
+### Setting it up
+
+```sh
+brew install powershell                 # PowerShell 7; the code is PowerShell
+pwsh -NoProfile -File selftest.ps1      # what works on this machine, and what does not
+pwsh -NoProfile -File install-hooks.ps1 # register the hooks in ~/.claude/settings.json
+pwsh -NoProfile -File session-api.ps1   # the service the display talks to
+```
+
+Run `selftest.ps1` **first**. The Mac side was written without a Mac to try it
+on, so instead of a page of "this should work" every assumption it rests on is a
+check: the runtime, the paths, the hooks and whether their interpreter can even
+start, the process table, reading beacons, the port, the cable, and whether
+macOS will let us raise another application at all.
+
+That last one is a permission, not code. The first time something is raised,
+macOS asks whether your terminal may control System Events; until you agree,
+tapping a row does nothing. Grant it under **System Settings > Privacy &
+Security > Automation** (some versions want **Accessibility** as well).
+`selftest.ps1` reports exactly this, so you do not have to guess which of the
+two it was.
+
+### What is not tested
+
+Everything above compiles and runs on Windows, and the platform-specific halves
+are exercised here — but not one line of the macOS path has run on a Mac. If
+something is wrong, `selftest.ps1` is the place it will show, and the parsing of
+`ps` output is the most likely candidate.
 
 ## Requirements
 
-- **Windows** with PowerShell 5.1 or newer
+- **Windows** with PowerShell 5.1 or newer, or **macOS** with PowerShell 7
+  (`brew install powershell`) — see [Running it on a Mac](#running-it-on-a-mac)
 - **Claude Code** with hooks enabled
 - For the display: **Arduino IDE** or `arduino-cli`, with **TFT_eSPI** (Bodmer)
-  and **XPT2046_Touchscreen** (Paul Stoffregen)
+  and **XPT2046_Touchscreen** (Paul Stoffregen); for the ESP32-S3 board also
+  **GFX Library for Arduino** (moononournation)
 - For editing the case: **Python** with `trimesh`, `manifold3d` and `shapely`
 
 ## Troubleshooting
 
 Run `diagnose.ps1` first — it checks whether the hooks are registered, whether
-status files are being written, and whether the HUD is running.
+status files are being written, and whether the HUD is running. On a Mac run
+`selftest.ps1` instead: it checks the things that differ there, including the
+permission macOS needs before anything can be brought to the front.
 
 | Symptom | Likely cause |
 |---|---|

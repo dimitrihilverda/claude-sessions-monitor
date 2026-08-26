@@ -6,13 +6,28 @@
 #  Dot-source:  . (Join-Path $PSScriptRoot 'focuslib.ps1')
 # =============================================================================
 
-Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+# The process table and the way to raise a program live here, because neither
+# is the same on a Mac.
+if (-not (Get-Command Get-DashProcTable -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot 'platformlib.ps1')
+}
+
+<#
+  Only the two Add-Type calls are fenced off, not the functions below them: the
+  file-based half of this library (Request-DashFocus and friends) is portable and
+  the API needs it on every machine. What is behind the fence is user32, which on
+  macOS would compile without complaint and then throw the first time it is
+  called -- a confusing place to discover the platform.
+#>
+if ($DashOnWindows) {
+    Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+}
 
 # Walking the parent chain alone is not enough: with "attach project" two
 # projects share one process, and MainWindowHandle then returns an arbitrary
 # one of the two windows. So we look at every visible window and score it on
 # the parent chain AND on the project name in the window title.
-if (-not ('Dash.Win' -as [type])) {
+if ($DashOnWindows -and -not ('Dash.Win' -as [type])) {
 Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
@@ -82,41 +97,14 @@ $DashHostProcs = @(
 # parent has already exited, ParentProcessId points at a reused PID and you
 # would end up at some unrelated window.
 <#
-  The process table, fetched in one go and kept for a moment.
-
-  Walking a parent chain used to cost one filtered CIM query per level, and a
-  single one of those takes about 640 ms on this machine -- four levels came to
-  two full seconds. One unfiltered query returns all 566 processes in roughly
-  550 ms, so we ask once and walk it in memory: a fixed cost instead of one that
-  grows with the depth of the chain.
-
-  The short cache matters for the case that hurt: raising a window does several
-  chain walks in a row while scoring candidate windows. Without it each one paid
-  the query again. Two seconds is short enough that a process which has since
-  exited is still caught by the liveness checks elsewhere.
+  The process table used to be built here. It moved to platformlib.ps1 when the
+  Mac arrived, because the walk over it is identical on both and only the way to
+  get it differs -- CIM against `ps`. The reason for having it at all is
+  unchanged: walking a parent chain cost one filtered CIM query per level, about
+  640 ms each on this machine, so four levels came to two full seconds. One
+  unfiltered query returns all 566 processes in roughly 550 ms, and raising a
+  window does several chain walks in a row while scoring candidates.
 #>
-$script:DashProcTable   = $null
-$script:DashProcTableAt = [datetime]::MinValue
-
-function Get-DashProcTable {
-    if ($null -ne $script:DashProcTable -and
-        ([datetime]::UtcNow - $script:DashProcTableAt).TotalMilliseconds -lt 2000) {
-        return $script:DashProcTable
-    }
-    $tab = @{}
-    try {
-        foreach ($p in (Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate,Name -ErrorAction Stop)) {
-            $tab[[int]$p.ProcessId] = @{
-                Parent = [int]$p.ParentProcessId
-                Start  = $p.CreationDate
-                Name   = [string]$p.Name
-            }
-        }
-    } catch { }
-    $script:DashProcTable   = $tab
-    $script:DashProcTableAt = [datetime]::UtcNow
-    return $tab
-}
 
 function Get-DashProcChain([int]$startPid) {
     $tab = Get-DashProcTable
@@ -156,6 +144,10 @@ $DashTerminalHints = @('terminal', 'console', 'cmd', 'powershell', 'bash', 'wsl'
 
 function Get-DashWindowCandidates {
     param([string]$Cwd, [int]$OwnerPid = 0, [int]$HostPid = 0, [string]$Title = '')
+
+    # No window list to enumerate anywhere but Windows. Callers treat an empty
+    # result as "nothing to raise", which is the truth here.
+    if (-not $DashOnWindows) { return @() }
 
     $leaf = ''
     if ($Cwd) { try { $leaf = Split-Path -Leaf $Cwd } catch { } }
@@ -246,6 +238,7 @@ function Get-DashBestWindow {
 #>
 function Show-DashWindow {
     param([Parameter(Mandatory = $true)]$Handle)
+    if (-not $DashOnWindows) { return $false }
     try {
         if ([Dash.Win]::IsIconic($Handle)) { [void][Dash.Win]::ShowWindow($Handle, 9) }  # SW_RESTORE
 
@@ -387,8 +380,44 @@ function Write-DashFocusResult {
     } catch { }
 }
 
+<#
+  Raise the program a session belongs to, on a Mac.
+
+  There is no window list to score here, so this is coarser than the Windows
+  path by nature: you get the right application, and which tab is in front
+  inside it is the application's business. Walking up from the session's own
+  process is what finds it -- the ancestor of the shell is the terminal or the
+  editor that opened it.
+
+  Returns the same shape as the Windows side so callers need not care, Raised
+  included -- and that one has to mean what it says. An earlier version of the
+  Windows code discarded that answer and the display reported success while
+  nothing moved on screen.
+#>
+function Invoke-DashMacFocus {
+    param($Session)
+
+    $ownerPid = 0
+    if ($Session.PSObject.Properties['owner_pid'] -and $Session.owner_pid) { $ownerPid = [int]$Session.owner_pid }
+    if ($ownerPid -le 0) { return $null }
+
+    $app = Get-DashMacApp $ownerPid
+    if (-not $app) { return $null }
+
+    $ok = Show-DashMacApp $app.Pid
+    return [pscustomobject]@{
+        Handle = 0
+        Pid    = $app.Pid
+        Title  = $app.Name
+        Score  = 0
+        Raised = $ok
+    }
+}
+
 function Invoke-DashSessionFocus {
     param($Session, [switch]$FolderFallback)
+
+    if (-not $DashOnWindows) { return (Invoke-DashMacFocus -Session $Session) }
 
     $hostPid = 0
     if ($Session.PSObject.Properties['host_pid'] -and $Session.host_pid) { $hostPid = [int]$Session.host_pid }
@@ -397,9 +426,10 @@ function Invoke-DashSessionFocus {
     elseif ($Session.PSObject.Properties['name'] -and $Session.name) { $titel = [string]$Session.name }
     $best = Get-DashBestWindow -Cwd ([string]$Session.cwd) -OwnerPid ([int]$Session.owner_pid) -HostPid $hostPid -Title $titel
     if ($best) {
-        # Niet weggooien wat we net hebben uitgezocht: Show-DashWindow weet of het
-        # venster echt naar voren kwam, en zonder die uitkomst meldt de API "ok"
-        # terwijl er op het scherm niets gebeurt. Dat kostte een halve middag.
+        # Do not throw away what we just worked out: Show-DashWindow knows
+        # whether the window actually came forward, and without that result the
+        # API reports "ok" while nothing happens on screen. That cost an
+        # afternoon to find.
         $gelukt = Show-DashWindow -Handle $best.Handle
         $best | Add-Member -NotePropertyName Raised -NotePropertyValue $gelukt -Force
         return $best
@@ -407,7 +437,10 @@ function Invoke-DashSessionFocus {
     if ($FolderFallback) {
         try {
             $cwd = [string]$Session.cwd
-            if ($cwd -and (Test-Path $cwd)) { Start-Process explorer.exe $cwd }
+            if ($cwd -and (Test-Path $cwd)) {
+                if ($DashOnWindows) { Start-Process explorer.exe $cwd }
+                else                { & open $cwd }
+            }
         } catch { }
     }
     return $null
@@ -422,6 +455,9 @@ function Send-DashKeys {
         [Parameter(Mandatory = $true)][string]$Keys,
         [int]$DelayMs = 250
     )
+    # SendKeys is WinForms, and there is no equivalent that types into another
+    # application on macOS without a good deal more permission than raising one.
+    if (-not $DashOnWindows) { return $false }
     if (-not (Show-DashWindow -Handle $Handle)) { return $false }
     Start-Sleep -Milliseconds $DelayMs
     if ([Dash.Win]::GetForegroundWindow() -ne $Handle) { return $false }

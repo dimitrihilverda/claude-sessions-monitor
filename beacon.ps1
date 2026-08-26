@@ -10,6 +10,12 @@
 # =============================================================================
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Loaded before sessionlib, and by name rather than through it: $DashOnWindows
+# decides which notification path Show-DashToast takes, and a variable that
+# arrives only as a side effect of another file's loading is a variable that will
+# one day be missing -- in which case "not Windows" would be the answer on
+# Windows too.
+. (Join-Path $PSScriptRoot 'platformlib.ps1')
 . (Join-Path $PSScriptRoot 'sessionlib.ps1')
 
 # --- Windows notification settings ------------------------------------------
@@ -23,6 +29,25 @@ $ToastEnabled        = $true
 $ToastStopMinSeconds = 60
 
 function Show-DashToast([string]$title, [string]$body) {
+    <#
+      On a Mac none of the three attempts below can work -- they are Windows
+      notification APIs -- and each would spend time failing before the next one
+      tried. Notification Center takes one line instead. Quoting matters: a
+      session title is arbitrary text, and an unescaped double quote inside it
+      would end the AppleScript string and turn the rest into syntax.
+    #>
+    if (-not $DashOnWindows) {
+        try {
+            # .Replace and not -replace: -replace takes a regex, and a lone
+            # backslash is not a valid one. Backslash first, then the quote, or
+            # the second pass would escape the backslashes the first one added.
+            $t = $title.Replace('\', '\\').Replace('"', '\"')
+            $b = $body.Replace('\', '\\').Replace('"', '\"')
+            & osascript -e "display notification `"$b`" with title `"$t`"" 2>$null
+        } catch { }
+        return
+    }
+
     # First choice: a real Windows toast (stays in the notification centre).
     try {
         [void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]

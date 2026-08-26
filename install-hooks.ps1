@@ -3,11 +3,29 @@
 # Backs up an existing settings.json first.
 $ErrorActionPreference = 'Stop'
 
-$settingsDir  = Join-Path $env:USERPROFILE '.claude'
-$settingsPath = Join-Path $settingsDir 'settings.json'
+. (Join-Path $PSScriptRoot 'platformlib.ps1')
+
+$settingsDir  = Get-DashClaudeDir
+$settingsPath = Get-DashSettingsFile
 $beacon = Join-Path $PSScriptRoot 'beacon.ps1'
 if (-not (Test-Path $beacon)) { throw "beacon.ps1 not found next to this script ($beacon)" }
-$cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$beacon`""
+
+<#
+  Which PowerShell runs the hook. On Windows that is the one already on every
+  machine; on macOS it is PowerShell 7 (brew install powershell), which the rest
+  of the Mac side needs anyway.
+
+  -ExecutionPolicy is deliberately absent from the Mac command: pwsh on Unix has
+  no execution policy, and passing the switch there is an error rather than
+  something harmlessly ignored.
+#>
+if ($DashOnWindows) {
+    $cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$beacon`""
+} else {
+    $exe = (Get-Process -Id $PID).Path
+    if (-not $exe) { $exe = 'pwsh' }
+    $cmd = "`"$exe`" -NoProfile -File `"$beacon`""
+}
 # PostToolUse fires on every tool call and is what takes a session out of the
 # "needs you" state once you have approved a permission request. Without it a
 # session stays orange until it fully finishes, because Claude Code fires

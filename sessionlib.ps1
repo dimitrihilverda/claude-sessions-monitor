@@ -31,6 +31,10 @@ $DashHideCwds = @()
 if (-not (Get-Command T -ErrorAction SilentlyContinue)) {
     . (Join-Path $PSScriptRoot 'langlib.ps1')
 }
+# Where home is, what the process table looks like: not the same on a Mac.
+if (-not (Get-Command Get-DashProcTable -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot 'platformlib.ps1')
+}
 
 function Get-DashState([string]$ev) {
     switch ($ev) {
@@ -76,13 +80,17 @@ function Get-DashOwner {
 
     $cur = $FromPid
     for ($i = 0; $i -lt 8; $i++) {
-        $p = Get-CimInstance Win32_Process -Filter "ProcessId=$cur" -ErrorAction SilentlyContinue
+        # One table for the whole walk instead of two queries per level: same
+        # answer, and on Windows it is the difference between a hook that costs
+        # over a second and one that costs about three quarters of it.
+        $p = Get-DashProcEntry $cur
         if (-not $p) { break }
-        $ppid = [int]$p.ParentProcessId
+        $ppid = [int]$p.Parent
         if ($ppid -le 4) { break }
-        $par = Get-CimInstance Win32_Process -Filter "ProcessId=$ppid" -ErrorAction SilentlyContinue
+        $par = Get-DashProcEntry $ppid
         if (-not $par) { break }
-        if ([string]$par.Name -match '^(node|claude)\.exe$') {
+        # No .exe on a Mac, and the name there is the leaf of the executable path.
+        if ([string]$par.Name -match '^(node|claude)(\.exe)?$') {
             $start = ''
             try { $start = (Get-Process -Id $ppid -ErrorAction Stop).StartTime.ToString('o') } catch { }
             <#
@@ -91,9 +99,11 @@ function Get-DashOwner {
               which is a genuine session and fires the same hooks -- but it is not
               a terminal you are sitting in, and seeing it appear next to your own
               session in the same folder is baffling until it is labelled.
-              The command line is already on the object we fetched, so this is free.
+              The command line is not on the shared process table -- fetching it
+              for every process would make the table expensive -- so it is asked
+              for here, once, for this one process.
             #>
-            $cmd = [string]$par.CommandLine
+            $cmd = [string](Get-DashProcArgs $ppid)
             $agent = ($cmd -match 'claude-agent-sdk|claude-agent-acp|acp-agents')
             return [pscustomobject]@{ OwnerPid = $ppid; Start = $start; Agent = $agent }
         }
@@ -165,6 +175,15 @@ function Get-DashDesktopPid {
 $DashNeverHost = @('explorer', 'dwm')
 
 function Get-DashHostPid([int]$fromPid) {
+    <#
+      MainWindowHandle is a Windows idea. On macOS .NET leaves it at zero for
+      every process, so this walk can only ever return 0 there -- and returning
+      0 is the honest answer: the Mac side does not pick a window at all, it
+      raises the owning application (see Show-DashMacApp). Bailing out here
+      keeps us from walking the whole tree to prove it.
+    #>
+    if (-not $DashOnWindows) { return 0 }
+
     $id = $fromPid
     for ($i = 0; $i -lt 8 -and $id -gt 4; $i++) {
         try {
@@ -172,9 +191,9 @@ function Get-DashHostPid([int]$fromPid) {
             if ($p.MainWindowHandle -ne [IntPtr]::Zero -and
                 ($DashNeverHost -notcontains $p.ProcessName.ToLower())) { return $id }
         } catch { }
-        $ci = Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue
-        if (-not $ci) { break }
-        $id = [int]$ci.ParentProcessId
+        $e = Get-DashProcEntry $id
+        if (-not $e) { break }
+        $id = [int]$e.Parent
     }
     return 0
 }
@@ -217,7 +236,7 @@ function Get-DashTabTitle([int]$hostPid) {
 function Get-DashTranscript([string]$path, [string]$sessionId) {
     if ($path -and (Test-Path -LiteralPath $path)) { return $path }
     if ($sessionId) {
-        $root = Join-Path $env:USERPROFILE '.claude\projects'
+        $root = Get-DashProjectsDir
         if (Test-Path $root) {
             $hit = Get-ChildItem -Path $root -Filter ($sessionId + '.jsonl') -Recurse -File -ErrorAction SilentlyContinue |
                    Select-Object -First 1

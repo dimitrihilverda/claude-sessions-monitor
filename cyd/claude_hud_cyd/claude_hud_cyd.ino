@@ -842,6 +842,24 @@ bool readTouch(int& sx, int& sy) {
   return gfxTouchPoint(sx, sy);
 }
 
+/* One press must count once, and the debounce alone cannot promise that.
+
+   The debounce clock starts before the request goes out, and a request over the
+   cable blocks for as long as the PC takes to answer -- up to a second and a half
+   while it raises a window. By the time we are back, 350 ms has long passed, so
+   the report the panel makes when the finger comes off is read as a fresh press
+   and the whole thing runs a second time. Measured over USB: every tap and every
+   button arrived twice, which on the approve button means two Enters.
+
+   So wait for the finger to actually leave before the clock starts. The ceiling
+   is there because a panel that insists it is still being touched must not be
+   able to hold the loop. */
+static void wachtTotLos() {
+  uint32_t t0 = millis();
+  while (gfxTouched() && millis() - t0 < 1000) delay(10);
+  lastTouch = millis();
+}
+
 void handleTouch() {
   int x, y;
   if (!readTouch(x, y)) return;
@@ -878,6 +896,7 @@ void handleTouch() {
       selIdx = i;
       drawAll();
       sendFocus(i);
+      wachtTotLos();
     }
     return;
   }
@@ -887,11 +906,13 @@ void handleTouch() {
     if (i == HIT_UP || i == HIT_DOWN) {
       flashButton(i);
       scrollBy(i == HIT_UP ? -1 : 1, false);
+      wachtTotLos();
       return;
     }
     flashButton(i);
     char b[2] = { (char)('1' + i), 0 };
     sendAction(b);
+    wachtTotLos();
   }
 }
 

@@ -56,6 +56,27 @@ namespace Dash {
     [DllImport("user32.dll", EntryPoint = "GetWindowThreadProcessId")]
     public static extern uint ThreadOf(IntPtr h, IntPtr pid);
 
+    [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+
+    /*
+      Take the foreground lock off.
+
+      Windows refuses to let a program put itself in front while somebody is
+      working in something else, and that refusal is a latch, not a timeout you
+      can wait out -- which is why every call in Show-DashWindow returns success
+      and nothing moves. The latch is released by the user pressing Alt or Esc,
+      and only by that. So press Alt: down and straight back up, aimed at nothing.
+
+      Alt rather than a key nobody has, because it is the key the rule names.
+      Down and up in the same breath so no menu bar has time to open under it.
+    */
+    public static void UnlockForeground() {
+      const byte VK_MENU = 0x12;
+      const uint KEYEVENTF_KEYUP = 0x0002;
+      keybd_event(VK_MENU, 0, 0, UIntPtr.Zero);
+      keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+    }
+
     [DllImport("user32.dll")] static extern int GetWindowTextLength(IntPtr h);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int max);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
@@ -249,12 +270,28 @@ function Show-DashWindow {
         Start-Sleep -Milliseconds 60
         if ([Dash.Win]::GetForegroundWindow() -eq $Handle) { return $true }
 
+        <#
+          Everything above this line works only when the window is already in
+          front, which is the one case where raising it was never needed. The
+          moment somebody is actually working in another program, Windows has the
+          foreground latched and all three calls return success while the screen
+          does not change. Measured: the tap reported "found but would not come
+          forward" and the foreground window was unmoved.
+
+          So take the latch off first, then ask. The Alt tap is what releases it.
+        #>
+        [Dash.Win]::UnlockForeground()
+        Start-Sleep -Milliseconds 30
+        [void][Dash.Win]::SetForegroundWindow($Handle)
+        if ([Dash.Win]::GetForegroundWindow() -eq $Handle) { return $true }
+
         $eigen = [Dash.Win]::GetCurrentThreadId()
         $doel  = [Dash.Win]::ThreadOf($Handle, [IntPtr]::Zero)
         if ($doel -ne 0 -and $doel -ne $eigen) {
             $vast = $false
             try {
                 $vast = [Dash.Win]::AttachThreadInput($eigen, $doel, $true)
+                [Dash.Win]::UnlockForeground()
                 [void][Dash.Win]::BringWindowToTop($Handle)
                 [void][Dash.Win]::SetForegroundWindow($Handle)
             } finally {

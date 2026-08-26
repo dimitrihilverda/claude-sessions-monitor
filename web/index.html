@@ -60,7 +60,10 @@
   <h1>Flash the Cheap Yellow Display</h1>
   <p class="lead">
     Puts <a href="https://github.com/dimitrihilverda/claude-sessions-monitor">Claude&nbsp;Sessions&nbsp;Monitor</a>
-    firmware on an ESP32-2432S028R, straight from this page. No Arduino IDE, no toolchain.
+    firmware on an ESP32-2432S028R, straight from this page. No Arduino IDE, no
+    toolchain. The display then shows your live Claude&nbsp;Code sessions and which
+    one is waiting for you &mdash; over Wi-Fi, or over the USB cable when the
+    network will not cooperate.
   </p>
 
   <div class="card flash">
@@ -84,7 +87,8 @@
       does not. If no serial port shows up, install it from
       <a href="https://www.wch-ic.com/downloads/CH341SER_EXE.html">WCH</a>.</li>
     <li><strong>Close the Arduino IDE</strong> and any serial monitor. Only one
-      program can hold the port.</li>
+      program can hold the port &mdash; and if you already run the PC service,
+      release the port from the HUD menu first (see below).</li>
   </ul>
 
   <h2>What happens after flashing</h2>
@@ -107,6 +111,46 @@
     To change them later, hold your finger on the top bar of the display for two
     seconds. That is the way back in when the display is on Wi-Fi but the PC address
     has gone stale &mdash; in that case the portal never appears on its own.
+  </p>
+
+  <h2>What you get</h2>
+  <table>
+    <tr><th>Tap a row</th><td>Raises that session's terminal window on your PC</td></tr>
+    <tr><th>Tap the top bar</th><td>Steps the brightness, six levels</td></tr>
+    <tr><th>Hold the top bar</th><td>Two seconds opens the setup page again</td></tr>
+    <tr><th>Three buttons</th><td>Approve, reject, snooze &mdash; and you decide what they mean, on the PC, without reflashing</td></tr>
+    <tr><th>Arrows</th><td>Appear past four sessions, to scroll the list</td></tr>
+  </table>
+  <p>
+    Up to sixteen sessions are kept, four shown at a time. A session that starts
+    asking for you scrolls itself into view, so a quiet screen really does mean
+    nothing wants you.
+  </p>
+  <p class="note">
+    All the text follows your Windows display language, and it comes from the PC
+    rather than the firmware &mdash; so changing language does not mean flashing
+    again. Dutch and English ship today.
+  </p>
+
+  <h2>If your network blocks the port</h2>
+  <p>
+    Office networks tend to block a port like 8787, and guest networks often keep
+    devices from talking to each other at all. There is then nothing for the
+    display to poll &mdash; while it hangs off the laptop by a cable that could
+    carry the same data.
+  </p>
+  <p>
+    So it does. The service on your PC pushes the identical payload over this same
+    USB cable, and the display prefers it whenever it is arriving. Nothing to
+    configure: plug it in and it uses the cable, unplug it and it goes back to
+    Wi-Fi by itself. The header shows <strong>USB</strong> next to the clock so you
+    can tell which one you are on.
+  </p>
+  <p class="note">
+    One consequence: while the service is feeding the display it holds the COM
+    port, so flashing from this page will fail with a port error. The HUD's
+    right-click menu has <strong>&ldquo;Release the USB port&rdquo;</strong> for
+    exactly that &mdash; it lets go for a minute and reattaches on its own.
   </p>
 
   <h2>It flashed, and the screen is white</h2>

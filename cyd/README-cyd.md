@@ -5,15 +5,43 @@ seconds and shows one row per session: orange = needs you, green = working,
 grey = done. When a session turns orange it beeps, flashes the top bar, and
 lights the on-board RGB LED to match.
 
-**Tapping a row** selects that session and brings its terminal window to the
-front on your PC — exactly what clicking in the HUD does.
+## What it does
+
+| Action | Result |
+|---|---|
+| Tap a row | Select that session and raise its terminal window on your PC — exactly what clicking in the HUD does |
+| Tap the top bar | Step the brightness: 100 / 70 / 50 / 35 / 25 / 15 % |
+| Hold the top bar, 2 s | Open the setup page, to change Wi-Fi or the PC address |
+| Tap a button | Run that button's action from `actions.json` |
+| Press a physical button | The same three actions, plus BOOT as a fourth |
+| Tap ▲ or ▼ | Scroll, once there are more sessions than rows |
+| Hold BOOT, 2 s | An easter egg; touch the screen or press anything to leave |
 
 **The three buttons** do whatever `actions.json` on your PC says. The display
 only sends "button 2 on session X"; your PC decides what that means. By default
 button 1 approves (Enter), button 2 rejects (Escape), and button 3 snoozes the
-session for ten minutes. The labels along the bottom of the screen come from the
-same file, so changing them does not mean reflashing. The board's own BOOT button
-acts as a fourth button.
+session for ten minutes. The labels along the bottom of the screen come from that
+same file, so changing them does not mean reflashing.
+
+### More sessions than fit
+
+Four rows fit on screen; up to sixteen sessions are kept. Past the fourth, the
+third button slot turns into ▲ and ▼ so the other two labels stay fully readable,
+and the third *physical* button pages down alongside them, wrapping to the top —
+otherwise it would still snooze while an arrow sits next to it, and a button that
+does something other than what it says is worse than a button that does less.
+
+A session that starts asking for you scrolls itself into view. Without that an
+orange alarm could sit below the fold, and then a quiet screen would no longer
+mean nothing wants you — which costs more than the alarm is worth. A hairline on
+the right edge shows where you are in the list.
+
+### When it cannot reach the PC
+
+It says so and keeps trying, roughly once a second, and shows the attempt count,
+how long contact has been gone, and the signal strength. That last number is the
+useful one: at -75 dBm or lower it is range rather than a fault, and no setting
+will fix it.
 
 A printable case with those three buttons lives in [`../case/`](../case/).
 
@@ -98,9 +126,13 @@ prefers whatever arrived over serial while it is less than ten seconds old, so:
 - no usable Wi-Fi *and* a cable → it goes straight to work instead of sitting in
   the setup portal, which is what used to happen
 
-Taps and button presses go back over the same cable. The header shows **USB** next
-to the clock when that is the transport, so "it works" and "it works over the
-cable" do not look identical.
+Taps and button presses go back over the same cable, through the same code path
+the HTTP endpoints use — so the "only when that session is asking" brake cannot
+drift between the two. The header shows **USB** next to the clock when that is the
+transport, so "it works" and "it works over the cable" do not look identical.
+
+There is no token over serial, unlike `/action` over the network: a cable plugged
+into that machine is its own proof of access.
 
 **The catch:** a serial port belongs to one program at a time, so while the
 service is attached a flash or a serial monitor will fail. Use the HUD's

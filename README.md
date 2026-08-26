@@ -26,16 +26,22 @@ that blocks the port does not leave you with a blank screen.
                          |
                     beacon.ps1
                          |
-              session-status/*.json          one small file per session
+              session-status/*.json      one small file per session
                          |
-                   sessionlib.ps1            state, cleanup, snooze, payload
+                   sessionlib.ps1        state, cleanup, snooze, payload
                     /         \
               hud.ps1      session-api.ps1
-                 |            /        \
-           floating HUD   /cyd.txt   web page
-                             |
-                      Cheap Yellow Display
+                 |          /     |     \
+           floating HUD    /   web page   \
+                          /               \
+                   /cyd.txt over      the same payload
+                   Wi-Fi (HTTP)       pushed over USB
+                          \               /
+                       Cheap Yellow Display
 ```
+
+The display takes whichever of those two is available, so a network that
+blocks the port does not leave you with a blank screen.
 
 ---
 
@@ -131,9 +137,21 @@ wscript.exe api.vbs
 Sessions that are already running pick up the hooks only after that session
 restarts.
 
-The HUD is draggable, remembers where you put it, and its right-click menu has
-compact rows, an attention-only filter, autostart, and the address other devices
-should use to reach your PC.
+The HUD is draggable and remembers where you put it. Click a row to raise that
+terminal; shift-click opens the folder instead, and ctrl-click shows which windows
+were considered and why one was picked — useful when it lands on the wrong project.
+
+Its right-click menu:
+
+| Entry | For |
+|---|---|
+| Always on top, compact rows | Appearance |
+| Only sessions that need me | Hide everything that is not asking for you |
+| Address of this PC | The address to type into the display; clicking copies it |
+| Open status page | The same list in a browser |
+| Cracktro on the display | Fire the easter egg from here |
+| Release the USB port | Hand the COM port back for a minute, so you can flash |
+| Start when I log in | Autostart for the HUD and the web service |
 
 ## The Cheap Yellow Display
 
@@ -141,6 +159,26 @@ The CYD is an ESP32-2432S028R: a 2.8" 320×240 ILI9341 touchscreen with an ESP32
 on the back, sold for around £10. It polls your PC every three seconds and shows
 one row per session. Tapping a row brings that terminal window to the front on
 your PC — the same thing clicking in the HUD does.
+
+### Using it
+
+| On the display | What it does |
+|---|---|
+| Tap a row | Select that session and raise its terminal window on your PC |
+| Tap the top bar | Step the brightness (100 / 70 / 50 / 35 / 25 / 15 %) |
+| Hold the top bar, 2 s | Open the setup page, to change Wi-Fi or the PC address |
+| The three buttons | Whatever `actions.json` says - by default approve, reject, snooze |
+| The arrows, past four sessions | Scroll the list. The third slot becomes them, and the third physical button pages down alongside |
+| Hold BOOT, 2 s | An easter egg. Touch the screen or press anything to leave |
+
+More sessions than fit on screen are kept and scrolled, not dropped. A session
+that starts asking for you scrolls itself into view, so a quiet screen really
+does mean nothing wants you, and a hairline on the right edge shows there is
+more below.
+
+When it cannot reach the PC it says so and keeps trying, showing the attempt
+count, how long contact has been gone, and the signal strength - enough to tell
+"still trying" from "given up", and a range problem from a real fault.
 
 ### Flash it from your browser
 

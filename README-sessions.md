@@ -194,6 +194,10 @@ Endpoints on port 8787:
 |---|---|
 | `/cyd.txt` | the ESP32 — plain text, no JSON library needed |
 | `/sessions.json` | the same data as JSON |
+| `/focus?id=<sid>` | raise that session's window |
+| `/action?id=<sid>&b=N` | run button action N |
+| `/demo` | start the easter egg on the display |
+| `/serial/release?sec=60` | let go of the USB port, so you can flash |
 | `/` | a tiny status page, fine on a phone |
 
 The first time, Windows Firewall asks for permission: choose **allow on private
@@ -208,11 +212,40 @@ Flashing the display and dealing with panel quirks is covered in
 [cyd/README-cyd.md](cyd/README-cyd.md); the printable case with three MX buttons
 in [case/README-case.md](case/README-case.md).
 
+### Over USB, when the network will not do
+
+Besides answering HTTP the service pushes the identical payload over USB serial
+every three seconds, and the display prefers it while it is fresh. That is what
+keeps the thing working on a network that blocks 8787, or a guest network that
+keeps devices apart — measured at the office: the display sat happily on the
+Wi-Fi and every HTTP poll returned `-1`.
+
+It finds the port by chip (`VID_1A86`) rather than by number, because this board
+turned up as COM12 one day and COM16 the next. The PnP query for that costs about
+a second, so `GetPortNames()` is the cheap gate and the lookup only runs when the
+set of ports actually changes. The port is opened with DTR and RTS off: on a CH340
+those drive the auto-reset circuit, and leaving them on reboots the display every
+time the service starts.
+
+Because a serial port belongs to one program at a time, the service holding it
+means a flash fails. `/serial/release` lets go for a minute and reattaches by
+itself; the HUD menu has a button for it. `-SerialBridge:$false` keeps the service
+off the port entirely.
+
+One structural note: the accept loop used to block on `AcceptTcpClient()`, which
+left no moment to service the bridge — on a quiet network it would never have run
+at all. It polls `Pending()` now, so both share a single thread without runspaces.
+
 ### Tapping and buttons
 
 Tap a row and the display sends `/focus?id=<session>`, and your PC brings that
 session's window forward — the same window finder the HUD uses, because it lives
 in `focuslib.ps1` and both share it.
+
+Past four sessions the third button slot becomes ▲ and ▼ to scroll, and the third
+physical button pages down alongside them. Up to sixteen sessions are kept; a
+session that starts asking for you scrolls itself into view, because an alarm
+below the fold would teach you that a quiet screen means nothing.
 
 The three physical buttons send `/action?id=<session>&b=<number>`. What that
 means is set in **`actions.json`** on your PC, not in the sketch:

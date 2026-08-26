@@ -368,6 +368,21 @@ function Get-DashSessions {
 
         $name = if ($title) { $title } else { $folder }
 
+        <#
+          An editor's AI panel, rather than a session you opened. PhpStorm and
+          friends run Claude Code through the Agent SDK over ACP: a genuine
+          session firing the same hooks, from the same folder, and without a
+          label it appears as the bare folder name right next to your own.
+
+          This belongs here and not further down. It first sat after the
+          host-window loop, which only visits sessions that have a host_pid --
+          so with none of those, $x was null and the whole thing threw on every
+          call. Silently, because ErrorActionPreference is Continue.
+        #>
+        if (-not $title -and $s.PSObject.Properties['owner_agent'] -and $s.owner_agent) {
+            $name = 'Agent · ' + $folder
+        }
+
         $hidden = $false
         foreach ($h in $DashHideCwds) {
             if ($h -and $cwd -and ($cwd.TrimEnd('\') -ieq ([string]$h).TrimEnd('\'))) { $hidden = $true }
@@ -438,12 +453,6 @@ function Get-DashSessions {
             # take from it. Do make clear it is not a terminal session.
             if (-not $x.title) { $x.name = 'Cowork · ' + $x.folder }
         }
-    }
-
-    # Same idea for an editor's AI panel: without this it shows up as the bare
-    # folder name, right next to your own session in that folder.
-    if ($x.PSObject.Properties['owner_agent'] -and $x.owner_agent -and -not $x.title) {
-        $x.name = 'Agent · ' + $x.folder
     }
 
     # Two sessions with the same name (for instance the same folder twice, with no

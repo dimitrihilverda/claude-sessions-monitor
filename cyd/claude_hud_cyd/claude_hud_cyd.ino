@@ -238,6 +238,10 @@ String   cfgSsid, cfgPass, cfgHost;
 uint16_t cfgPort = 8787;
 
 bool      portaalActief = false;
+/* Did the portal come up by itself, or did somebody ask for it by holding the
+   top bar? Only the first kind may be taken away again when the cable starts
+   feeding us -- the other is somebody halfway through typing a password. */
+bool      portaalVanzelf = false;
 WebServer portaalWeb(80);
 DNSServer portaalDns;
 
@@ -879,6 +883,7 @@ void handleTouch() {
     if (millis() - neer >= 2000) {
       say(TXT_SETUP);
       drawHeader();
+      portaalVanzelf = false;          // asked for, so the cable does not get to end it
       startPortaal();
       return;
     }
@@ -1012,6 +1017,11 @@ void portaalToon() {
   gfxText(GF_SMALL, GA_TL, 14, 136, "Springt er geen pagina open, ga dan naar:", COL_TXT, COL_BG);
   gfxText(GF_BIG,   GA_TL, 14, 156, WiFi.softAPIP().toString(), COL_GREEN, COL_BG);
   gfxText(GF_SMALL, GA_TL, 14, 200, "Na opslaan herstart hij zelf.", COL_MUTED, COL_BG);
+  /* Push it. Every other screen in this sketch is flushed by the bottom of
+     loop(), and the portal is the one path that never gets there -- so on a
+     panel that draws into a buffer this whole page stayed in PSRAM and the
+     display sat black. It looked like a board that would not start. */
+  gfxFlushNow();
 }
 
 static String htmlVeilig(const String& in) {
@@ -1094,6 +1104,30 @@ void portaalOpslaan() {
                   "</b>.</body>");
   delay(800);                       // give the page a moment to be sent
   ESP.restart();
+}
+
+/* Close the portal without rebooting.
+
+   Rebooting was the first attempt and it is a trap: a restart makes the PC's
+   open handle on the port useless, the service needs a few seconds to notice and
+   reattach, and by then setup()'s four-second look for the cable is over -- so
+   the board lands right back in the portal. Measured: out of the portal, reboot,
+   straight back into the portal. Do it again and that is a loop.
+
+   Taking the AP down in place keeps the cable connected throughout, which is the
+   whole point of leaving. */
+void stopPortaal() {
+  if (!portaalActief) return;
+  portaalWeb.stop();
+  portaalDns.stop();
+  WiFi.softAPdisconnect(true);
+  WiFi.mode(WIFI_STA);
+  portaalActief = false;
+  setLed(false, false, false);
+  fingerprint = "";                  // nothing on the glass is ours any more
+  gfxFillScreen(COL_BG);
+  drawAll();
+  Serial.println("portaal gesloten");
 }
 
 void startPortaal() {
@@ -1413,6 +1447,10 @@ void setup() {
      cable capable of carrying the whole payload was plugged in the entire time.
      A little over one push interval is enough to be sure. */
   gfxText(GF_SMALL, GA_TL, 12, 82, "checking USB...", COL_MUTED, COL_BG);
+  /* Same reason as the portal: nothing drawn in setup() reaches a buffered panel
+     until loop() flushes, and between here and there sit four seconds of cable
+     check and up to twenty of Wi-Fi. That is a long time to look switched off. */
+  gfxFlushNow();
   uint32_t tSer = millis();
   while (millis() - tSer < 4000 && !serialFresh()) { serialPump(); delay(20); }
 
@@ -1427,7 +1465,7 @@ void setup() {
   } else {
     /* Never configured, and no PC on the cable either? Then the portal is the
        only way to tell it anything. */
-    if (!cfgSsid.length()) { startPortaal(); return; }
+    if (!cfgSsid.length()) { portaalVanzelf = true; startPortaal(); return; }
 
     WiFi.mode(WIFI_STA);
     WiFi.begin(cfgSsid.c_str(), cfgPass.c_str());
@@ -1440,7 +1478,9 @@ void setup() {
 
     /* Neither Wi-Fi nor a cable. The password or the network changed, and the
        portal is the only way out that needs no PC. */
-    if (WiFi.status() != WL_CONNECTED && !serialFresh()) { startPortaal(); return; }
+    if (WiFi.status() != WL_CONNECTED && !serialFresh()) {
+      portaalVanzelf = true; startPortaal(); return;
+    }
     if (WiFi.status() == WL_CONNECTED) wifiVerbonden();
   }
 
@@ -1450,8 +1490,26 @@ void setup() {
 
 void loop() {
   /* While the portal is open this thing does nothing else: no polling, no
-     reconnecting. Otherwise bewaakWifi() would pull the AP out from under it. */
-  if (portaalActief) { portaalLus(); delay(5); return; }
+     reconnecting. Otherwise bewaakWifi() would pull the AP out from under it.
+
+     Except read the cable. A board with no Wi-Fi settings that boots while the
+     PC service happens to be quiet ends up here, and used to stay here: the
+     portal was the one path that never looked at the serial port, so a cable
+     that came alive a second later went unnoticed until somebody power-cycled
+     it. Flashing produces exactly that situation every single time, because
+     flashing is when the service lets the port go.
+
+     Only when the portal came up on its own. If somebody held the top bar to
+     get here they are changing a password, and having the screen vanish
+     mid-word because a cable woke up is its own kind of broken. */
+  if (portaalActief) {
+    portaalLus();
+    serialPump();
+    if (!(portaalVanzelf && serialFresh())) { delay(5); return; }
+    Serial.println("portaal: kabel leeft, portaal sluit");
+    stopPortaal();
+    // and on into the ordinary loop below, this same pass
+  }
 
   serialPump();
 

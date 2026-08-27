@@ -507,6 +507,7 @@ $script:serReleaseTo = [datetime]::MinValue
 $script:serBuf       = ''
 $script:serPortsSeen = ''
 $script:serCh340     = ''
+$script:serWifiAt    = [datetime]::MinValue
 
 <#
   Which port is the display on?
@@ -614,8 +615,125 @@ function Send-DashSerialLine([string]$line) {
     try { $script:ser.Write($line + "`n") } catch { Close-DashSerial 'write failed' }
 }
 
+<#
+  Which of our addresses is worth telling the display about?
+
+  Not simply the first: this machine also has 172.19.112.1 from WSL and
+  192.168.56.1 from VirtualBox, and neither is reachable from a shelf across the
+  room. The one with a default gateway is the one on the real network.
+#>
+function Get-DashLanAddress {
+    try {
+        $cfg = @(Get-NetIPConfiguration -ErrorAction Stop |
+                 Where-Object { $_.IPv4DefaultGateway -and $_.IPv4Address })
+        if ($cfg.Count) { return [string]$cfg[0].IPv4Address[0].IPAddress }
+    } catch { }
+    try {
+        return [string](@(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+                Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
+                Select-Object -ExpandProperty IPAddress)[0])
+    } catch { return '' }
+}
+
+<#
+  Every network this machine has a password for, newest-looking first.
+
+  Exported as XML rather than scraped from "netsh wlan show profile": that output
+  is translated, so the field holding the key is "Key Content" on one machine and
+  "Sleutelinhoud" on the next, while the XML tags are the same everywhere. The
+  export writes passwords to disk in the clear, so it goes to a private temporary
+  folder that is removed again before this function returns -- including when it
+  throws.
+#>
+function Get-DashWifiProfiles {
+    if (-not $DashOnWindows) { return @() }
+    $map = Join-Path ([IO.Path]::GetTempPath()) ('dashwifi-' + [guid]::NewGuid().ToString('N'))
+    $uit = @()
+    try {
+        $null = New-Item -ItemType Directory -Path $map -Force -ErrorAction Stop
+        $null = & netsh wlan export profile key=clear folder="$map" 2>&1
+        foreach ($f in @(Get-ChildItem -Path $map -Filter *.xml -ErrorAction SilentlyContinue)) {
+            try {
+                [xml]$x = Get-Content -Path $f.FullName -Raw -Encoding UTF8
+                $naam = [string]$x.WLANProfile.SSIDConfig.SSID.name
+                if (-not $naam) { $naam = [string]$x.WLANProfile.name }
+                if (-not $naam) { continue }
+                # An open network has no sharedKey at all; that is a blank password,
+                # not a reason to leave it out.
+                $sleutel = [string]$x.WLANProfile.MSM.security.sharedKey.keyMaterial
+                $uit += [pscustomobject]@{ Ssid = $naam; Key = $sleutel }
+            } catch { }
+        }
+    } catch {
+    } finally {
+        Remove-Item -Path $map -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    <#
+      Order matters more than it looks, because only the first handful get sent.
+
+      Thirty saved profiles is a decade of hotels and other people's kitchens,
+      and sorting them by name buries the one network that is actually in this
+      room -- measured here: the useful one came fifteenth and would have been
+      cut. So: networks this machine can hear right now come first, since being
+      on the air is the only property that matters, and the one we are joined to
+      leads them. Our own radio hears both bands where the display hears one, so
+      this is a wider net than the display needs rather than a narrower one.
+    #>
+    $huidig = ''
+    try {
+        $r = @(& netsh wlan show interfaces 2>&1 | Select-String '^\s*SSID\s*:\s*(.+)$')
+        if ($r.Count) { $huidig = $r[0].Matches[0].Groups[1].Value.Trim() }
+    } catch { }
+
+    $inDeLucht = @{}
+    try {
+        foreach ($m in @(& netsh wlan show networks 2>&1 | Select-String '^\s*SSID\s+\d+\s*:\s*(.+)$')) {
+            $n = $m.Matches[0].Groups[1].Value.Trim()
+            if ($n) { $inDeLucht[$n] = $true }
+        }
+    } catch { }
+
+    return @($uit | Sort-Object `
+        @{ Expression = { $_.Ssid -ne $huidig } },
+        @{ Expression = { -not $inDeLucht.ContainsKey($_.Ssid) } },
+        @{ Expression = { $_.Ssid } })
+}
+
+<#
+  The display has no network and said so. Hand it everything we know and let it
+  choose: it is the only one of the two that can hear what is actually on the
+  air, and this radio is 2.4 GHz while ours may not be.
+
+  Base64 per field, because an SSID or a passphrase may hold a space or a pipe.
+#>
+function Send-DashWifiProfiles {
+    if (-not $DashOnWindows) { return }
+    # Once is enough. Without this a display that keeps saying so on every payload
+    # would have us shelling out to netsh every three seconds.
+    if (([datetime]::UtcNow - $script:serWifiAt).TotalSeconds -lt 60) { return }
+    $script:serWifiAt = [datetime]::UtcNow
+
+    $profielen = @(Get-DashWifiProfiles)
+    if (-not $profielen.Count) { Write-DashLog 'wifi: niets te sturen, geen profielen'; return }
+    if ($profielen.Count -gt 12) { $profielen = @($profielen[0..11]) }
+
+    foreach ($p in $profielen) {
+        $s = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$p.Ssid))
+        $k = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$p.Key))
+        Send-DashSerialLine "@WIFI $s $k"
+    }
+    $ip = Get-DashLanAddress
+    if ($ip) { Send-DashSerialLine "@HOST $ip $Port" }
+    Send-DashSerialLine '@WIFIEND'
+    # The names, never the keys.
+    Write-DashLog ('wifi: ' + $profielen.Count + ' netwerken aangeboden (' +
+                   (($profielen | Select-Object -First 3 | ForEach-Object { $_.Ssid }) -join ', ') + '...)')
+}
+
 function Invoke-DashSerialLine([string]$line) {
     if ($line -match '^@FW\s+(\S+)') { Set-DashDisplayFw $Matches[1] 'usb'; return }
+    if ($line -eq '@NOWIFI')         { Send-DashWifiProfiles; return }
     $snap = Get-SessieCache
     if ($line -match '^@FOCUS\s+(\S+)') {
         Send-DashSerialLine ('@REPLY ' + (Invoke-DashTap -All $snap.all -Sid $Matches[1] -Kind 'focus' -Via 'USB'))

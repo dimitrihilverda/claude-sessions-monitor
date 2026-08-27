@@ -24,6 +24,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <Preferences.h>
+#include <mbedtls/base64.h>
 #include <FS.h>
 #include <WebServer.h>
 #include <DNSServer.h>
@@ -584,6 +585,83 @@ bool     serInBlock   = false;
 
 bool serialFresh() { return serAt && (millis() - serAt < SERIAL_FRESH_MS); }
 
+/* ---- Wi-Fi settings over the cable ----------------------------------------
+
+   A board that has never been told a network says so, and the PC answers with
+   every network it knows a password for. The choice is made here rather than
+   there, and deliberately: this radio is 2.4 GHz only, while the PC is perfectly
+   happy on 5 GHz -- ask the PC which network to use and it will confidently name
+   one this board can never see. Scanning and picking the first one that is
+   actually on the air puts the decision where the evidence is.
+
+   Base64 per field because an SSID or a passphrase may contain a space, a pipe,
+   or anything else that would otherwise have to be escaped out of the way. */
+#define MAX_WIFI_KANDIDAAT 12
+
+struct WifiKandidaat { String ssid; String pass; };
+WifiKandidaat wifiKand[MAX_WIFI_KANDIDAAT];
+int           nWifiKand  = 0;
+String        wifiHost   = "";
+uint16_t      wifiPoort  = 0;
+
+static String b64uit(const String& in) {
+  unsigned char buf[130];            // 32-byte SSID and 63-byte passphrase both fit
+  size_t uit = 0;
+  if (mbedtls_base64_decode(buf, sizeof(buf) - 1, &uit,
+                            (const unsigned char*)in.c_str(), in.length()) != 0) return "";
+  buf[uit] = 0;
+  return String((const char*)buf);
+}
+
+// "@WIFI <b64 ssid> <b64 pass>" -- one per network, in the order the PC prefers.
+static void wifiKandidaatErbij(const String& rest) {
+  if (nWifiKand >= MAX_WIFI_KANDIDAAT) return;
+  int sp = rest.indexOf(' ');
+  String ssid = b64uit(sp < 0 ? rest : rest.substring(0, sp));
+  String pass = sp < 0 ? String("") : b64uit(rest.substring(sp + 1));
+  if (!ssid.length()) return;
+  wifiKand[nWifiKand].ssid = ssid;
+  wifiKand[nWifiKand].pass = pass;
+  nWifiKand++;
+}
+
+void kiesWifiUitLijst() {
+  int aantal = nWifiKand;
+  nWifiKand = 0;                     // whatever happens, the list is spent
+  if (aantal == 0) return;
+
+  /* Not while the portal is up. It runs an access point, and scanning pulls the
+     radio out from under it -- and somebody is looking at that screen. */
+  if (portaalActief)   { Serial.println("wifi: portaal staat open, lijst genegeerd"); return; }
+  if (cfgSsid.length()) { Serial.println("wifi: al ingesteld, lijst genegeerd");      return; }
+
+  Serial.printf("wifi: %d netwerken aangeboden, scannen\n", aantal);
+  int n = WiFi.scanNetworks();
+  int gekozen = -1;
+  for (int k = 0; k < aantal && gekozen < 0; k++)
+    for (int i = 0; i < n; i++)
+      if (WiFi.SSID(i) == wifiKand[k].ssid) { gekozen = k; break; }
+  WiFi.scanDelete();
+
+  if (gekozen < 0) {
+    Serial.printf("wifi: geen van de %d is hier te horen -- 5 GHz?\n", aantal);
+    return;
+  }
+  Serial.printf("wifi: \"%s\" gekozen\n", wifiKand[gekozen].ssid.c_str());
+  cfgSsid = wifiKand[gekozen].ssid;
+  cfgPass = wifiKand[gekozen].pass;
+  if (wifiHost.length()) {
+    cfgHost  = wifiHost;
+    cfgPort  = wifiPoort ? wifiPoort : 8787;
+  }
+  bewaarInstellingen(cfgSsid, cfgPass, cfgHost, cfgPort);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(cfgSsid.c_str(), cfgPass.c_str());
+}
+
+// Say so when there is no network to fall back on, so the PC can offer its own.
+static void meldGeenWifi() { if (!cfgSsid.length()) Serial.println("@NOWIFI"); }
+
 // Read whatever has arrived. Never blocks, so it is safe to call from anywhere.
 void serialPump() {
   while (Serial.available()) {
@@ -608,6 +686,10 @@ void serialPump() {
           // Announce ourselves on the way in, so the PC knows which firmware
           // is on the other end of the cable.
           Serial.println(String("@FW ") + FW_VERSION);
+          /* And whether we have a network. This is the moment that covers a
+             board which booted while the service was already attached -- it
+             never gets asked then, so it has to volunteer. */
+          meldGeenWifi();
         }
         serPayload = serBlock;
         serAt = millis();
@@ -623,7 +705,19 @@ void serialPump() {
        been plugged in and does nothing for the case that matters as much: the PC
        service restarting. The payload on this side is still fresh then, so
        nothing is announced and the About box cannot say what is running. */
-    else if (l == "?FW") { Serial.println(String("@FW ") + FW_VERSION); }
+    else if (l == "?FW") { Serial.println(String("@FW ") + FW_VERSION); meldGeenWifi(); }
+
+    /* Networks the PC knows a password for, then where to reach it, then a line
+       saying that is all -- at which point we scan and pick. Note the space in
+       "@WIFI ": it is what keeps this from swallowing "@WIFIEND". */
+    else if (l.startsWith("@WIFI "))  { wifiKandidaatErbij(l.substring(6)); }
+    else if (l == "@WIFIEND")         { kiesWifiUitLijst(); }
+    else if (l.startsWith("@HOST ")) {
+      String rest = l.substring(6);
+      int sp = rest.indexOf(' ');
+      wifiHost  = sp < 0 ? rest : rest.substring(0, sp);
+      wifiPoort = sp < 0 ? 0    : (uint16_t)rest.substring(sp + 1).toInt();
+    }
   }
 }
 

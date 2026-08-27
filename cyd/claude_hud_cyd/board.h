@@ -52,8 +52,7 @@
 #define ROW_Y        30
 #define ROW_H        41
 #define MAX_ROWS      4    // rows that fit on screen at once
-#define NAME_Y        2    // a short name, in the big font
-#define NAME_SM_Y     4    // a long one, a size down
+#define NAME_SM_Y     4    // the session name; one size for every row
 #define INFO_Y       23
 #define CHIP_H       17
 #define BAR_Y       196
@@ -62,7 +61,6 @@
 #define BTN_GAP       4
 /* Truncation limits in characters. Both fonts are proportional here, so these
    are deliberately conservative rather than exact. */
-#define NAME_BIG_MAX 16    // up to this length the name gets the big font
 #define NAME_MAX     34
 #define WHY_MAX      52
 
@@ -98,7 +96,6 @@
 #define ROW_Y        40
 #define ROW_H        46
 #define MAX_ROWS      5
-#define NAME_Y        1
 #define NAME_SM_Y     4
 #define INFO_Y       26
 #define CHIP_H       19
@@ -107,9 +104,9 @@
 #define BTN_W       152    // 8 + 3*152 + 2*6 gaps = 476, inside 480
 #define BTN_GAP       6
 /* This font is monospaced, so these are exact: a row is 468 px wide, less a
-   16 px indent, at 12 px per character for the small font and 18 for the big. */
-#define NAME_BIG_MAX 18
-#define NAME_MAX     25
+   16 px indent, at 12 px per character. Thirty fits beside the state chip; the
+   old 25 was set when a name this long was the fallback rather than the rule. */
+#define NAME_MAX     29
 #define WHY_MAX      37
 
 #else

@@ -401,15 +401,15 @@ void drawRow(int i) {
     gfxBufRoundRect(6, 0, RW, ROW_H - 3, 6, rowBg);
     gfxBufRect(6, 0, 3, ROW_H - 3, c);
 
-    // Short names large, longer titles a size smaller: since the beacon started
-    // sending the real session title, those names are much longer than a folder name.
+    /* One size for every name. Short ones used to get the big font and longer
+       ones a size down, which reads sensibly in a list of one and arbitrarily in
+       a list of three: the eye takes a size difference for a difference in
+       importance, and here it only meant the title was short. The smaller of the
+       two, because a title you can read to the end beats a title you can read
+       from further away -- roughly thirty characters instead of nineteen. */
     String nm = rows[r].name;
-    if (nm.length() <= NAME_BIG_MAX) {
-      gfxBufText(GF_BIG, GA_TL, 16, NAME_Y, nm, COL_TXT, rowBg);
-    } else {
-      if (nm.length() > NAME_MAX) nm = nm.substring(0, NAME_MAX - 1) + ".";
-      gfxBufText(GF_SMALL, GA_TL, 16, NAME_SM_Y, nm, COL_TXT, rowBg);
-    }
+    if (nm.length() > NAME_MAX) nm = nm.substring(0, NAME_MAX - 1) + ".";
+    gfxBufText(GF_SMALL, GA_TL, 16, NAME_SM_Y, nm, COL_TXT, rowBg);
 
     /* State chip, just like Draw-Chip in hud.ps1: fill in the state colour at
        alpha 38 over the row, border at 150, text in the full colour. That is

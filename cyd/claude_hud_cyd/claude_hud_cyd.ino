@@ -1186,6 +1186,13 @@ void wifiVerbonden() {
 void bewaakWifi() {
   static uint32_t wegSinds = 0;
 
+  /* Nothing to watch over. A board that has never been given a network used to
+     sit in the portal forever, so this could not happen; now that the portal
+     hands back to the cable, it can. Without this the loop reconnects to an
+     empty SSID for ever, and each pass costs the 200 ms below -- which is enough
+     to starve the serial reader and lose the very payload it is waiting for. */
+  if (!cfgSsid.length()) return;
+
   if (WiFi.status() == WL_CONNECTED) {
     if (wegSinds) { wegSinds = 0; wifiVerbonden(); }   // just came back
     return;
@@ -1413,6 +1420,13 @@ void cracktro() { }
 
 // ---- setup / loop ----------------------------------------------------------
 void setup() {
+  /* Room for a whole payload. The default is 256 bytes and the PC pushes the
+     entire session list in one go: past four or five sessions the tail of every
+     block -- the ">>>" that ends it -- was dropped before this loop got round to
+     reading, so the block never completed and the display sat there saying it
+     had no connection while the cable was busy feeding it. Must come before
+     begin(). */
+  Serial.setRxBufferSize(2048);
   Serial.begin(115200);
   delay(200);
   /* Version first, because that is the one you compare against what is

@@ -241,6 +241,20 @@ page opens where you pick your network, enter the password, and give it the
 address of your PC. Settings are stored in NVS, so they survive reflashing, and
 holding the top bar for two seconds brings the page back if anything changes.
 
+On Windows you can usually skip that. Plugged into a PC running the service, a
+display that has no network says so, and the PC answers with the networks it has
+passwords for — it has them already — along with its own address. The display
+picks: it scans, and takes the first one it can actually hear. That last part is
+the point rather than a detail, because this radio is 2.4 GHz only while your PC
+is perfectly happy on 5 GHz. Ask the PC which network to use and it will
+confidently name one the display can never reach.
+
+Only when the display has no network of its own, so nothing you set deliberately
+is replaced, and never while the portal is open. Your password travels down the
+USB cable and into NVS — the same place the portal would put it, but worth
+knowing, since this happens without being asked. On macOS the key sits in the
+Keychain behind a prompt per network, so that path keeps the portal.
+
 A printable case with three mechanical buttons is in [case/](case/), including
 the parametric generator that produced the STLs.
 
@@ -272,12 +286,12 @@ serial monitor fails while it is attached. The HUD's right-click menu has
 **"Release the USB port"** for exactly that — it lets go for a minute and
 reattaches on its own, so there is nothing to switch back.
 
-> **Give the display a moment before you unplug the cable and walk off.** A board
-> that has never been given Wi-Fi settings, and boots while nothing is pushing
-> down the cable, goes to its setup portal — and that portal does not read the
-> serial port, so a cable that comes alive afterwards goes unnoticed until the
-> next restart. Flashing hits this every time, because flashing is exactly when
-> the service has let the port go.
+A board with no Wi-Fi settings that boots while nothing is pushing down the
+cable puts up its setup portal, which is right — that is what the portal is
+for. It also keeps reading the cable while it is up, and closes itself the
+moment one starts feeding it. Not when you opened the portal yourself by
+holding the top bar: you are typing a password, and a screen that vanishes
+mid-word is its own kind of broken.
 
 ## Physical buttons and actions
 

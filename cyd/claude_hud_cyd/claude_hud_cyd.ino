@@ -361,15 +361,24 @@ void drawHeader() {
   /* Say which pipe the data came in over. Without it "it works" and "it works
      over the cable" look identical, and that is exactly what you want to know
      when the network is the thing you are unsure about. */
+  /* Both, not one or the other. The first version showed the bars only when the
+     cable was out, on the reasoning that this is one question -- which pipe? --
+     and so wants one answer. It is two. Plugged in, the question you actually
+     have is whether the Wi-Fi is set up and strong enough for the moment you
+     unplug, and the version that hid the bars behind the cable answered exactly
+     the wrong one.
+
+     So: USB when the cable is feeding, and the bars whenever a network has been
+     configured at all. Four dim bars mean it is configured and not connected
+     right now, which is a different thing from having no network, and both are
+     different from a weak link. Nothing at all only when no network was ever
+     set. */
   int slot = SCR_W - 20 - gfxTextWidth(GF_SMALL, right);
   if (serialFresh()) {
     gfxText(GF_SMALL, GA_TR, slot, HDR_TXT_Y, "USB", alarm ? COL_BG : COL_GREEN, bg);
-  } else {
-    // Nothing at all when there is no network: the left of this bar already says
-    // so in words, and two ways of saying "offline" is one too many.
-    int n = wifiStaafjes();
-    if (n) tekenStaafjes(slot, n, alarm);
+    slot -= gfxTextWidth(GF_SMALL, "USB") + 8;
   }
+  if (cfgSsid.length()) tekenStaafjes(slot, wifiStaafjes(), alarm);
   gfxDrawHLine(0, HDR_H, SCR_W, COL_LINE);
 }
 
@@ -1705,10 +1714,10 @@ void loop() {
 
   /* Repaint for the bars only when their number changes. RSSI moves every
      reading, and redrawing the header for each one would flicker on the CYD and
-     cost a whole 300 KB frame on the S3 for a change nobody can see. The -2
-     stands for the cable, so swapping between USB and Wi-Fi repaints too. */
-  static int staafjesGetoond = -3;
-  int staafjesNu = serialFresh() ? -2 : wifiStaafjes();
+     cost a whole 300 KB frame on the S3 for a change nobody can see. The cable
+     is folded into the same number, so swapping pipe repaints as well. */
+  static int staafjesGetoond = -1;
+  int staafjesNu = (serialFresh() ? 100 : 0) + wifiStaafjes();
   if (staafjesNu != staafjesGetoond) { staafjesGetoond = staafjesNu; drawHeader(); }
 
   // clear the header line when a message has expired

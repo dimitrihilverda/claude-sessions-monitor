@@ -220,8 +220,16 @@ keeps the thing working on a network that blocks 8787, or a guest network that
 keeps devices apart — measured at the office: the display sat happily on the
 Wi-Fi and every HTTP poll returned `-1`.
 
-It finds the port by chip (`VID_1A86`) rather than by number, because this board
-turned up as COM12 one day and COM16 the next. The PnP query for that costs about
+It also carries the Wi-Fi setup on Windows: a display with no network says
+`@NOWIFI`, the service answers with every network it has a password for — read
+out of `netsh wlan export profile` as XML, because the text version of that
+command is translated — plus its own address, and the display picks the one it
+can actually hear. The choice belongs on the display: it is 2.4 GHz only, and
+this machine is quite happy on 5 GHz.
+
+It finds the port by chip rather than by number, because this board turned up as
+COM12 one day and COM16 the next. Two vendor ids: `VID_1A86` for the CH340 in
+front of the CYD, `VID_303A` for the S3, which speaks USB itself. The PnP query for that costs about
 a second, so `GetPortNames()` is the cheap gate and the lookup only runs when the
 set of ports actually changes. The port is opened with DTR and RTS off: on a CH340
 those drive the auto-reset circuit, and leaving them on reboots the display every

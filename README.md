@@ -209,6 +209,21 @@ turns into work.
 | The arrows, past four sessions | Scroll the list. The third slot becomes them, and the third physical button pages down alongside |
 | Hold BOOT, 2 s | An easter egg. Touch the screen or press anything to leave |
 
+The top right corner answers "how is this thing being fed": **USB** while the
+cable is pushing, and four bars for the radio whenever a network has been set at
+all. Four dim bars mean it is configured and not connected right now, which is a
+different thing from having no network, and both are different from a weak link.
+That difference is worth showing: on this desk -66 dBm fetched sessions every
+three seconds and -85 could not open a connection, and without the bars those two
+look exactly alike.
+
+Names and messages are flattened to plain ASCII by the PC before they are sent.
+The font on both panels has nothing else, and the two transports fail differently
+on the rest — the cable turns anything above 127 into a question mark, while over
+Wi-Fi the UTF-8 bytes arrive intact and get drawn as two pieces of nonsense each.
+Accents lose their marks, curly quotes and dashes are mapped, and anything truly
+foreign becomes a question mark rather than disappearing.
+
 More sessions than fit on screen are kept and scrolled, not dropped. A session
 that starts asking for you scrolls itself into view, so a quiet screen really
 does mean nothing wants you, and a hairline on the right edge shows there is

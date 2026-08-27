@@ -116,20 +116,35 @@ On a network that blocks port 8787 — most offices — or a guest network that 
 devices apart, there is nothing for the display to poll. If it is plugged into
 the PC, the cable carries the same data instead.
 
-Nothing to set up. `session-api.ps1` looks for the CH340 by chip rather than by
-port number (this board turned up as COM12 one day and COM16 the next), attaches,
-and pushes the identical `/cyd.txt` payload every three seconds. The display
+Nothing to set up. `session-api.ps1` looks for the board by chip rather than by
+port number (this one turned up as COM12 one day and COM16 the next), attaches,
+and pushes the identical `/cyd.txt` payload every three seconds. Two vendor ids,
+because there are two boards: `1A86` is the CH340 in front of the CYD, `303A` is
+Espressif's own, which the S3 speaks directly over its native USB. The display
 prefers whatever arrived over serial while it is less than ten seconds old, so:
 
 - plugged into the PC → it uses the cable, and skips Wi-Fi entirely
 - on a USB charger with no PC → nothing arrives, and it falls back to Wi-Fi
 - no usable Wi-Fi *and* a cable → it goes straight to work instead of sitting in
   the setup portal, which is what used to happen
+- already in the portal when a cable comes alive → the portal reads the cable
+  too, and closes itself. Not when you opened it yourself by holding the top
+  bar; you are typing a password there
 
 Taps and button presses go back over the same cable, through the same code path
 the HTTP endpoints use — so the "only when that session is asking" brake cannot
 drift between the two. The header shows **USB** next to the clock when that is the
-transport, so "it works" and "it works over the cable" do not look identical.
+transport, so "it works" and "it works over the cable" do not look identical, and
+the signal bars sit beside it whether or not the cable is in — plugged in, the
+question you actually have is whether the Wi-Fi is ready for the moment you pull
+it out.
+
+On Windows the cable can also do the Wi-Fi setup for you. A board with no network
+says so, the PC answers with the networks it already has passwords for plus its
+own address, and the board picks the first one it can actually hear. That last
+part belongs on the board and not on the PC: this radio is 2.4 GHz only, while
+your PC is perfectly happy on 5 GHz and will confidently name a network the board
+can never reach.
 
 There is no token over serial, unlike `/action` over the network: a cable plugged
 into that machine is its own proof of access.
@@ -154,7 +169,8 @@ To keep the service off the port entirely, start it with `-SerialBridge:$false`.
 | "No connection" | The web service is not running (start "Claude Deck API" or `api.vbs`), the firewall is blocking it, or the PC address is stale — fix the last one by holding the top bar for two seconds and opening the portal |
 | Slow or dropped polls | The API reads `sessions.json`, which the HUD writes every 3 s, so a request costs a few ms. If the HUD is not running it falls back to rebuilding from WMI process queries, which takes 1.2-1.5 s and can exceed the display's timeout — so start the HUD, or accept the slower path |
 | "No connection" while the API is clearly reachable from the PC | Testing from the PC itself proves nothing: traffic to your own address bypasses Windows Firewall. Start the service with `-LogRequests` and watch `actions.log`; if no request ever arrives from the display's address, the packets are not reaching the PC. Check whether the display is on a **guest or isolated Wi-Fi network** — those allow internet but block traffic between devices, and the ESP32 can only use 2.4 GHz, so it may end up on a different SSID than your PC |
-| It no longer joins your Wi-Fi (new password or network) | It brings up the `Claude-Deck` network by itself; join it with your phone and set it up again. No USB needed |
+| It no longer joins your Wi-Fi (new password or network) | It brings up the `Claude-Deck` network by itself; join it with your phone and set it up again. No USB needed. On Windows there is a shorter way: clear its settings and plug it into the PC, and the service hands it the networks it knows |
+| Connected to Wi-Fi and still "no connection" | Read the bars before anything else. Measured on one desk, -66 dBm polled happily every three seconds and -85 could not open a connection at all, and on screen those two looked identical. Two bars or fewer means move it or add an access point; the serial log prints the exact `rssi` on every poll. Note also that the board backs off to a slow retry after failures, so give it a minute before deciding a fix did not work |
 | No beep | The CYD has no speaker on board, only the pads. Solder one to the speaker pads (IO26) or set `BEEP_ENABLED` to false |
 | Taps land next to where you press | Set `TOUCH_DEBUG` to 1, tap the four corners, read the raw values in the serial monitor and fill in `TS_MINX/MAXX/MINY/MAXY`. If everything is mirrored, flip `TOUCH_FLIP_X` / `TOUCH_FLIP_Y` |
 | A button does nothing | Button 3 is on GPIO35, which has no internal pull-up. It needs an external 10k resistor to 3V3; without it the input floats |

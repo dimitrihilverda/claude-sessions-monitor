@@ -307,6 +307,43 @@ void say(const String& msg) {          // short message in the header line
 }
 
 // ---- painting --------------------------------------------------------------
+/* How well is the radio holding up?
+
+   "It works over the cable" and "it works" already look different in this bar,
+   because the cable says USB. On Wi-Fi there was nothing at all, and that turned
+   out to matter: -66 dBm here fetched sessions every three seconds and -85 could
+   not open a connection, while the screen looked identical in both cases. Four
+   bars is enough to tell those apart from across the room. */
+static int wifiStaafjes() {
+  if (WiFi.status() != WL_CONNECTED) return 0;
+  int r = WiFi.RSSI();
+  if (r >= -55) return 4;
+  if (r >= -65) return 3;
+  if (r >= -75) return 2;
+  return 1;
+}
+
+/* Right-aligned on x2 and centred in the bar. Sized from HDR_H rather than
+   written out twice, so the two panels stay in proportion if the bar changes. */
+static void tekenStaafjes(int x2, int n, bool alarm) {
+  int bh  = HDR_H / 2;
+  int bw  = HDR_H / 10;  if (bw  < 2) bw  = 2;
+  int gat = bw / 2;      if (gat < 1) gat = 1;
+  int x0    = x2 - (4 * bw + 3 * gat);
+  int onder = (HDR_H + bh) / 2;
+
+  for (int i = 0; i < 4; i++) {
+    bool aan = (i < n);
+    /* On an orange header the missing bars are left out rather than painted in
+       some third colour. That bar is asking for you; it is not the moment for a
+       signal report. */
+    if (!aan && alarm) continue;
+    int h = bh * (i + 1) / 4;
+    gfxFillRect(x0 + i * (bw + gat), onder - h, bw, h,
+                aan ? (alarm ? COL_BG : COL_GREEN) : COL_MUTED);
+  }
+}
+
 void drawHeader() {
   bool alarm = (nAtt > 0);
   uint16_t bg = alarm ? COL_ORANGE : COL_HDR;
@@ -324,9 +361,14 @@ void drawHeader() {
   /* Say which pipe the data came in over. Without it "it works" and "it works
      over the cable" look identical, and that is exactly what you want to know
      when the network is the thing you are unsure about. */
+  int slot = SCR_W - 20 - gfxTextWidth(GF_SMALL, right);
   if (serialFresh()) {
-    gfxText(GF_SMALL, GA_TR, SCR_W - 20 - gfxTextWidth(GF_SMALL, right), HDR_TXT_Y,
-            "USB", alarm ? COL_BG : COL_GREEN, bg);
+    gfxText(GF_SMALL, GA_TR, slot, HDR_TXT_Y, "USB", alarm ? COL_BG : COL_GREEN, bg);
+  } else {
+    // Nothing at all when there is no network: the left of this bar already says
+    // so in words, and two ways of saying "offline" is one too many.
+    int n = wifiStaafjes();
+    if (n) tekenStaafjes(slot, n, alarm);
   }
   gfxDrawHLine(0, HDR_H, SCR_W, COL_LINE);
 }
@@ -1660,6 +1702,14 @@ void loop() {
     if (i == HIT_UP || i == HIT_DOWN) drawArrows(false, false);
     else if (i >= 0)                  drawButton(i, false);
   }
+
+  /* Repaint for the bars only when their number changes. RSSI moves every
+     reading, and redrawing the header for each one would flicker on the CYD and
+     cost a whole 300 KB frame on the S3 for a change nobody can see. The -2
+     stands for the cable, so swapping between USB and Wi-Fi repaints too. */
+  static int staafjesGetoond = -3;
+  int staafjesNu = serialFresh() ? -2 : wifiStaafjes();
+  if (staafjesNu != staafjesGetoond) { staafjesGetoond = staafjesNu; drawHeader(); }
 
   // clear the header line when a message has expired
   static uint32_t lastHdr = 0;

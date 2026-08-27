@@ -189,6 +189,54 @@ function Get-Payload($all) {
     return (Write-DashPayload -Root $Root -Sessions $all)
 }
 
+<#
+  Everything the display draws, in the alphabet it owns.
+
+  The 6x8 font on both panels is ASCII and nothing else, and the two transports
+  fail differently on the rest: the serial port turns anything above 127 into a
+  question mark, so "Agent - mios" arrived as "Agent ? mios", while over HTTP the
+  UTF-8 bytes arrive intact and get drawn as two pieces of nonsense each. Neither
+  is the display's fault, and neither is worth solving there -- the PC is the one
+  place that knows what the character was supposed to be.
+
+  So flatten it here. Punctuation is mapped by hand because a curly quote or an
+  ellipsis has no accented letter underneath to fall back to. Accents come off by
+  decomposing and dropping the marks, which turns e-acute into a plain e. What is
+  left over -- an emoji, a Chinese title -- becomes a question mark rather than
+  disappearing: a row that is missing half its words reads as a bug, and one with
+  question marks reads as "this screen cannot show that", which is the truth.
+#>
+$script:DashAsciiMap = @{
+    0x2018 = "'"; 0x2019 = "'"; 0x201A = "'"; 0x2032 = "'"      # kromme enkele aanhalingstekens
+    0x201C = '"'; 0x201D = '"'; 0x201E = '"'; 0x2033 = '"'      # kromme dubbele
+    0x00AB = '"'; 0x00BB = '"'                                  # guillemets
+    0x2010 = '-'; 0x2011 = '-'; 0x2012 = '-'; 0x2013 = '-'      # streepjes en kastlijntjes
+    0x2014 = '-'; 0x2015 = '-'; 0x2212 = '-'
+    0x00B7 = '-'; 0x2022 = '-'                                  # punt in het midden, opsommingsbolletje
+    0x2026 = '...'                                              # beletselteken
+    0x20AC = 'EUR'
+    0x00A0 = ' '; 0x2007 = ' '; 0x2009 = ' '; 0x202F = ' '      # de vaste spaties
+    0x0009 = ' '
+}
+
+function ConvertTo-DashAscii([string]$s) {
+    if (-not $s) { return '' }
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($c in $s.Normalize([Text.NormalizationForm]::FormD).ToCharArray()) {
+        $n = [int]$c
+        # The line breaks are the block format itself, so they pass untouched.
+        if ($n -eq 10 -or $n -eq 13) { [void]$sb.Append($c); continue }
+        if ($script:DashAsciiMap.ContainsKey($n)) {
+            [void]$sb.Append($script:DashAsciiMap[$n]); continue
+        }
+        # What a decomposed e-acute leaves behind once the plain e has been taken.
+        if ([Globalization.CharUnicodeInfo]::GetUnicodeCategory($c) -eq
+            [Globalization.UnicodeCategory]::NonSpacingMark) { continue }
+        if ($n -ge 32 -and $n -le 126) { [void]$sb.Append($c) } else { [void]$sb.Append('?') }
+    }
+    return $sb.ToString()
+}
+
 # ---- plain text for the ESP32 -----------------------------------------------
 # Line 1:  the header described below
 # Then  :  <state>|<name>|<since>|<why>|<session_id>
@@ -241,7 +289,9 @@ function Format-Cyd($p) {
         $nm = ([string]$s.name -replace '[\r\n\|]', ' ')
         [void]$sb.Append($s.state).Append('|').Append($nm).Append('|').Append($s.since).Append('|').Append($why).Append('|').Append($s.session_id).Append("`n")
     }
-    return $sb.ToString()
+    # Once, over the finished block: the separators and the session ids are ASCII
+    # already, so there is nothing to lose and nothing to remember to call.
+    return (ConvertTo-DashAscii $sb.ToString())
 }
 
 function Format-Html($p) {

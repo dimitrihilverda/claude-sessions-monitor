@@ -141,7 +141,8 @@ powershell -ExecutionPolicy Bypass -File hud.ps1
 | Click a row | bring that session's window to the front; if it cannot, it says so in a balloon tip |
 | Shift + click | open the project folder in Explorer |
 | Ctrl + click | show which windows the HUD found and with what score — for when it picks the wrong one |
-| Right-click | menu: always on top, compact rows, only sessions that need me, PC address, autostart, restart, quit |
+| Right-click a row | put that session away: gone from the HUD, the page and the display until you bring it back |
+| Right-click elsewhere | menu: hide sessions (the list, ticked = hidden), always on top, compact rows, only sessions that need me, PC address, autostart, restart, quit |
 | Double-click tray icon | hide or restore the HUD |
 | Esc / F5 | hide / refresh now |
 
@@ -300,7 +301,7 @@ no API to enumerate them account-wide.
 
 | File | What it is |
 |---|---|
-| `sessionlib.ps1` | shared session logic (states, PID check, snooze, payload) |
+| `sessionlib.ps1` | shared session logic (states, PID check, snooze, hiding, payload) |
 | `focuslib.ps1` | which window belongs to which session, and how to raise it |
 | `langlib.ps1` | every user-visible string, in every supported language |
 | `beacon.ps1` | called by the Claude Code hooks |
@@ -311,6 +312,7 @@ no API to enumerate them account-wide.
 | `actions.json` | what the buttons on the display do |
 | `actions.log` | what was executed, with timestamps |
 | `snooze.json` | which sessions are temporarily silenced |
+| `hidden.json` | which sessions you put away, until you bring them back |
 | `diagnose.ps1` | walks the whole chain when something is not working |
 | `cyd\` | Arduino sketch, TFT settings and flashing instructions |
 | `case\` | printable case: STLs, generator and build notes |

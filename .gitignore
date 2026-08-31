@@ -5,6 +5,7 @@ sessions.js
 sessions.json
 session-status/
 snooze.json
+hidden.json
 focus-request.json
 focus-result.json
 actions.log

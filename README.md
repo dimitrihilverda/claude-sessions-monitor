@@ -142,12 +142,21 @@ The HUD is draggable and remembers where you put it. Click a row to raise that
 terminal; shift-click opens the folder instead, and ctrl-click shows which windows
 were considered and why one was picked — useful when it lands on the wrong project.
 
+**Right-click a row to put that session away.** It disappears from the HUD, from
+the web page and from the display, and it stays away — no timer, unlike snooze.
+The header then says how many are hidden.
+
+The way back is in the menu, under **Hide sessions**: every running session with
+a tick in front of the hidden ones. Tick one to hide it, untick it to bring it
+back, or use *Show all again* at the bottom.
+
 Its right-click menu:
 
 | Entry | For |
 |---|---|
 | Always on top, compact rows | Appearance |
 | Only sessions that need me | Hide everything that is not asking for you |
+| Hide sessions | Every running session, ticked = hidden - tick and untick to hide and show |
 | Address of this PC | The address to type into the display; clicking copies it |
 | Open status page | The same list in a browser |
 | Cracktro on the display | Fire the easter egg from here |

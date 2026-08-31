@@ -59,6 +59,7 @@ $Root = $PSScriptRoot
 $StatusDir   = Join-Path $Root 'session-status'
 $ActionsPath = Join-Path $Root 'actions.json'
 $SnoozePath  = Join-Path $Root 'snooze.json'
+$HiddenPath  = Join-Path $Root 'hidden.json'
 $LogPath     = Join-Path $Root 'actions.log'
 
 function Write-DashLog([string]$txt) {
@@ -182,7 +183,7 @@ function Get-Actions {
 }
 
 function Get-Sessions {
-    return @(Get-DashSessions -Dir $StatusDir -SnoozeFile $SnoozePath)
+    return @(Get-DashSessions -Dir $StatusDir -SnoozeFile $SnoozePath -HiddenFile $HiddenPath)
 }
 
 function Get-Payload($all) {

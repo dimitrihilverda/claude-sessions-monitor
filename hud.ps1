@@ -6,7 +6,8 @@
 #
 #  Drag        : left mouse button anywhere in the window
 #  Click a row : tries to bring that session's terminal to the front
-#  Right-click : menu (pin, compact, attention only, autostart, quit)
+#  Right-click a row     : put that session away (also gone from the display)
+#  Right-click elsewhere : menu -- "hide sessions" lists them all, ticked = hidden
 #  Double-click tray: hide or restore the HUD
 # =============================================================================
 $ErrorActionPreference = 'Continue'
@@ -18,6 +19,7 @@ $Root = $PSScriptRoot
 
 $StatusDir  = Join-Path $Root 'session-status'
 $ConfigPath = Join-Path $Root 'hud-config.json'
+$HiddenPath = Join-Path $Root 'hidden.json'
 $RefreshMs  = 3000
 
 # Also refresh sessions.json / sessions.js, so the web page and the display
@@ -148,6 +150,7 @@ function Set-Rounded {
 # ---- state ------------------------------------------------------------------
 $state = [ordered]@{
     rows      = @()          # visible sessions
+    all       = @()          # every running session, hidden ones included
     known     = 0
     hitboxes  = @()          # @{ Rect; Sess }
     hover     = -1
@@ -161,6 +164,7 @@ $state = [ordered]@{
     fpUi      = ''          # what the window currently looks like
     lastCount = -1          # number of rows at the previous paint
     clock     = '--:--'
+    hiddenN   = 0           # sessions you put away that are still running
 }
 
 $HeadH = 30
@@ -228,6 +232,9 @@ $form.Add_Paint({
 
     $mb = New-Object System.Drawing.SolidBrush $C.Muted
     $meta = "$(@($state.rows).Count) live  ·  $($state.clock)"
+    # Say it in the bar you have to right-click to undo it. Without this the
+    # only sign that you hid something is a row that is not there any more.
+    if ($state.hiddenN -gt 0) { $meta = (T 'hud.hiddenCount' @($state.hiddenN)) + "  ·  " + $meta }
     if ($cfg.onlyAttention) { $meta = "filter aan  ·  " + $meta }
     $mw = $g.MeasureString($meta, $F.Small).Width
     $g.DrawString($meta, $F.Small, $mb, ($W - $mw - 12), 9)
@@ -243,7 +250,14 @@ $form.Add_Paint({
 
     if (@($state.rows).Count -eq 0) {
         $eb = New-Object System.Drawing.SolidBrush $C.Muted
-        if ($cfg.onlyAttention) {
+        if ($state.hiddenN -gt 0) {
+            # Same reason as the filter hint below: an empty HUD that is empty
+            # because of something you did should say so, and say the way back.
+            $ob = New-Object System.Drawing.SolidBrush $C.Orange
+            $g.DrawString((T 'empty.hidden'), $F.Why, $eb, 14, ($y + 6))
+            $g.DrawString((T 'empty.hiddenHint'), $F.Small, $ob, 14, ($y + 24))
+            $ob.Dispose()
+        } elseif ($cfg.onlyAttention) {
             # otherwise the HUD looks broken when it is only a filter being on
             $ob = New-Object System.Drawing.SolidBrush $C.Orange
             $g.DrawString((T 'empty.filtered'), $F.Why, $eb, 14, ($y + 6))
@@ -312,6 +326,13 @@ function Refresh-Now {
         $state.known = $all.Count
         $state.lastOk = Get-Date
 
+        # Only the ones you would otherwise be looking at. hidden.json keeps ids
+        # of sessions that ended long ago, and counting those would have the
+        # header promise you something that is not coming back -- and would put
+        # yesterday's sessions in the hide list.
+        $state.all     = @($all | Where-Object { $_.live })
+        $state.hiddenN = @($state.all | Where-Object { $_.ignored }).Count
+
         # only write to disk when something really changed
         if ($WritePayload) {
             $fp = (($vis | ForEach-Object { $_.session_id + $_.state + $_.updated }) -join ';')
@@ -340,7 +361,7 @@ function Refresh-Now {
     # Repainting is what you saw as flicker: only do it when something really
     # changes. If only the clock ticks, the header line is enough.
     $rows  = @($state.rows)
-    $fpUi  = (($rows | ForEach-Object { $_.session_id + '|' + $_.state + '|' + $_.label + '|' + $_.name + '|' + $_.why + '|' + $_.since }) -join ';') + '#' + $state.known + '#' + $cfg.onlyAttention
+    $fpUi  = (($rows | ForEach-Object { $_.session_id + '|' + $_.state + '|' + $_.label + '|' + $_.name + '|' + $_.why + '|' + $_.since }) -join ';') + '#' + $state.known + '#' + $cfg.onlyAttention + '#' + $state.hiddenN
     $clock = if ($state.lastOk) { $state.lastOk.ToString('HH:mm') } else { '--:--' }
 
     $countChanged = ($rows.Count -ne $state.lastCount)
@@ -586,6 +607,61 @@ function Add-Check($text, $checked, $action) {
     return $mi
 }
 
+<#
+  ---- the hide list ----------------------------------------------------------
+
+  Right-clicking a row puts it away, and that is the fast way. This is the way
+  back, and the way to see what you did: one entry per running session with a
+  tick in front of the hidden ones, so a hidden session is still somewhere you
+  can point at. Without it the only record of hiding something would be a row
+  that is not there.
+
+  The list is rebuilt every time the menu opens rather than kept in step with
+  the refresh. Sessions come and go every few seconds, and a menu that is only
+  correct on the tick you happen to open it would be worse than none.
+#>
+$miHideList = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.hideList')
+[void]$menu.Items.Add($miHideList)
+[void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+
+function Build-HideList {
+    # Clear() only unhooks them; without the Dispose you leak a handful of
+    # controls every time the menu is opened, and this menu gets opened a lot.
+    $oud = @($miHideList.DropDownItems)
+    $miHideList.DropDownItems.Clear()
+    foreach ($o in $oud) { try { $o.Dispose() } catch { } }
+
+    $sessies = @($state.all | Sort-Object @{Expression='rank'}, @{Expression='sort_ts'; Descending=$true})
+    if (-not $sessies.Count) {
+        $leeg = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.hideNone')
+        $leeg.Enabled = $false
+        [void]$miHideList.DropDownItems.Add($leeg)
+        return
+    }
+
+    foreach ($s in $sessies) {
+        $mi = New-Object System.Windows.Forms.ToolStripMenuItem ([string]$s.name)
+        # A tick means hidden -- it is a list of what you put away, under an
+        # entry that says "hide". CheckOnClick is off: the click handler writes
+        # the file and the next Opening rebuilds the list from what is on disk,
+        # so the tick can never disagree with what the HUD is showing.
+        $mi.Checked = [bool]$s.ignored
+        $mi.Tag     = [string]$s.session_id
+        $mi.ToolTipText = [string]$s.cwd
+        $mi.Add_Click({
+            param($sender, $e)
+            Toggle-Hidden ([string]$sender.Tag)
+        })
+        [void]$miHideList.DropDownItems.Add($mi)
+    }
+
+    [void]$miHideList.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+    $alles = New-Object System.Windows.Forms.ToolStripMenuItem (T 'menu.showAll' @($state.hiddenN))
+    $alles.Enabled = ($state.hiddenN -gt 0)
+    $alles.Add_Click({ Restore-Hidden })
+    [void]$miHideList.DropDownItems.Add($alles)
+}
+
 $miTop = Add-Check (T 'menu.topmost') $cfg.topmost {
     $cfg.topmost = -not $cfg.topmost
     $form.TopMost = [bool]$cfg.topmost
@@ -742,6 +818,11 @@ $menu.Add_Opening({
     #>
     $miDash.Visible = (Test-Path (Join-Path $Root 'dashboard.html'))
 
+    # Count in the entry itself, so you can see there is something in there
+    # without opening it.
+    $miHideList.Text = if ($state.hiddenN -gt 0) { (T 'menu.hideListWith' @($state.hiddenN)) } else { (T 'menu.hideList') }
+    Build-HideList
+
     $ip = Get-LanIp
     if ($ip) {
         $miAdres.Text    = (T 'menu.addressWith' @("$($ip):$ApiPort"))
@@ -754,9 +835,58 @@ $menu.Add_Opening({
     }
 })
 
-$form.ContextMenuStrip = $menu
+# Not $form.ContextMenuStrip: the right-click handler further down decides what
+# a right-click means depending on where it landed, and opens this menu itself.
 $tray.ContextMenuStrip = $menu
 $tray.Add_DoubleClick({ $form.Visible = -not $form.Visible })
+
+<#
+  ---- putting a session away, and getting them all back ----------------------
+
+  The write goes to hidden.json and then we refresh straight away rather than
+  waiting for the next tick: a right-click has to make the row disappear now,
+  and the display follows within its own poll because Refresh-Now rewrites
+  sessions.json.
+
+  Refresh-Now only repaints when the row fingerprint changed, and removing a row
+  changes the count -- but lastCount is reset anyway, because hiding the last
+  visible session leaves the same count of zero rows as a filter would.
+#>
+function Hide-Session($sess) {
+    if (-not $sess) { return }
+    $eerste = ($state.hiddenN -le 0)
+    if (-not (Add-DashHidden $HiddenPath ([string]$sess.session_id))) { return }
+    $state.lastCount = -1
+    Refresh-Now
+
+    # Only for the first one. A balloon on every right-click would be nagging,
+    # and by the second one you already know where the way back is.
+    if ($eerste) {
+        try {
+            $tray.ShowBalloonTip(5000, (T 'notify.hidden' @($sess.name)), (T 'notify.hiddenBody'), 'Info')
+        } catch { }
+    }
+}
+
+# What the tick in the hide list does. Toggling and not two entries, because the
+# list is one thing: everything that is running, with the hidden ones ticked.
+function Toggle-Hidden([string]$sid) {
+    if (-not $sid) { return }
+    $verborgen = Get-DashHidden $HiddenPath
+    if ($verborgen.ContainsKey($sid)) {
+        if (-not (Remove-DashHidden $HiddenPath $sid)) { return }
+    } else {
+        if (-not (Add-DashHidden $HiddenPath $sid)) { return }
+    }
+    $state.lastCount = -1
+    Refresh-Now
+}
+
+function Restore-Hidden {
+    if (-not (Clear-DashHidden $HiddenPath)) { return }
+    $state.lastCount = -1
+    Refresh-Now
+}
 
 # ---- mouse and keys ---------------------------------------------------------
 $form.Add_MouseDown({
@@ -767,8 +897,30 @@ $form.Add_MouseDown({
         $state.formFrom = New-Object System.Drawing.Point $form.Left, $form.Top
     }
 })
+<#
+  Right-click used to be one thing: the menu. It is now two, because where you
+  click says what you mean.
+
+    on a row      -> put that session away
+    anywhere else -> the menu, as before, with the hide list in it
+
+  Which is why the form no longer has a ContextMenuStrip of its own: WinForms
+  would open the menu on top of the first one. The tray icon keeps it, so the
+  menu is never more than one click away even with the HUD hidden.
+
+  Only hiding happens straight off a click. Bringing something back does not:
+  it is a thing you do deliberately, to a session you have to pick, and it lives
+  in the menu where you can see what you hid.
+#>
 $form.Add_MouseUp({
     param($s, $e)
+    if ($e.Button -eq 'Right') {
+        foreach ($h in $state.hitboxes) {
+            if ($h.Rect.Contains($e.Location)) { Hide-Session $h.Sess; return }
+        }
+        $menu.Show($form, $e.Location)
+        return
+    }
     if ($e.Button -ne 'Left') { return }
     $moved = $false
     if ($state.dragFrom) {
@@ -850,7 +1002,7 @@ $focusTimer.Add_Tick({
         # The HUD only holds visible sessions. Read the full list rather than
         # answering "not found" for something that does exist.
         try {
-            $alles = @(Get-DashSessions -Dir $StatusDir -SnoozeFile (Join-Path $Root 'snooze.json'))
+            $alles = @(Get-DashSessions -Dir $StatusDir -SnoozeFile (Join-Path $Root 'snooze.json') -HiddenFile $HiddenPath)
             foreach ($s in $alles) {
                 if ([string]$s.session_id -eq [string]$req.id) { $sess = $s; break }
             }

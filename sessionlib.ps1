@@ -318,6 +318,76 @@ function Get-DashTitle([string]$path, [string]$sessionId) {
     return ''
 }
 
+<#
+  ---- sessions you put away --------------------------------------------------
+
+  Snooze is a timer: it takes the orange off a session for twenty minutes and
+  then hands it back. This is the other thing you sometimes want -- a session
+  you are not interested in at all right now, gone from the HUD, gone from the
+  web page, and gone from the display, until you ask for it back.
+
+  So it does not expire. hidden.json is a plain map of session_id -> when you
+  put it away; the timestamp is there for a human reading the file, nothing
+  reads it back.
+
+  A hidden session is invisible, so the way back cannot be in the row -- it is
+  in the menu, which lists every session that is running and lets you tick the
+  ones you do not want to see. That is why there is a per-session Remove as
+  well as a Clear: the list can turn one back on without touching the others.
+
+  Keyed on session_id and not on the folder, because that is what you clicked.
+  A /clear gives the same terminal a new id and therefore a fresh start -- that
+  is the behaviour you want: you hid a conversation, not a project.
+#>
+function Get-DashHiddenFile([string]$Root) {
+    return (Join-Path $Root 'hidden.json')
+}
+
+function Get-DashHidden([string]$Path) {
+    $map = @{}
+    if (-not $Path -or -not (Test-Path $Path)) { return $map }
+    try {
+        $cur = Get-Content $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($prop in $cur.PSObject.Properties) {
+            if ($prop.Name) { $map[[string]$prop.Name] = [string]$prop.Value }
+        }
+    } catch { }
+    return $map
+}
+
+function Add-DashHidden([string]$Path, [string]$SessionId) {
+    if (-not $Path -or -not $SessionId) { return $false }
+    $map = Get-DashHidden $Path
+    $map[$SessionId] = (Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz')
+    try {
+        ($map | ConvertTo-Json) | Set-Content -Path $Path -Encoding UTF8
+        return $true
+    } catch { return $false }
+}
+
+function Remove-DashHidden([string]$Path, [string]$SessionId) {
+    if (-not $Path -or -not $SessionId) { return $false }
+    $map = Get-DashHidden $Path
+    if (-not $map.ContainsKey($SessionId)) { return $true }
+    $map.Remove($SessionId)
+    try {
+        # ConvertTo-Json on an empty hashtable gives "{}", which is what we want
+        ($map | ConvertTo-Json) | Set-Content -Path $Path -Encoding UTF8
+        return $true
+    } catch { return $false }
+}
+
+# Everything back at once. We write an empty object rather than deleting the
+# file: a file that exists and says nothing is easier to explain to someone
+# looking in the folder than one that keeps disappearing.
+function Clear-DashHidden([string]$Path) {
+    if (-not $Path) { return $false }
+    try {
+        '{}' | Set-Content -Path $Path -Encoding UTF8
+        return $true
+    } catch { return $false }
+}
+
 # ---- the session list -------------------------------------------------------
 # Reads every beacon, works out state and visibility, merges /clear duplicates
 # (same Claude process = one session) and with -Prune cleans up dead files.
@@ -325,6 +395,7 @@ function Get-DashSessions {
     param(
         [Parameter(Mandatory = $true)][string]$Dir,
         [string]$SnoozeFile = '',
+        [string]$HiddenFile = '',
         [switch]$Prune
     )
 
@@ -346,6 +417,11 @@ function Get-DashSessions {
             }
         } catch { }
     }
+
+    # Sessions you put away yourself. No expiry: they stay gone until you bring
+    # them all back.
+    if (-not $HiddenFile) { $HiddenFile = Get-DashHiddenFile (Split-Path -Parent $Dir) }
+    $verborgen = Get-DashHidden $HiddenFile
 
     foreach ($f in (Get-ChildItem -Path $Dir -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
         $s = $null
@@ -413,8 +489,20 @@ function Get-DashSessions {
             $why = [string]$s.prompt
         }
 
-        $visible = (-not $hidden) -and (@('attention','active','done') -contains $state) -and ($alive -ne $false)
-        if ($visible -and ($null -eq $alive) -and ($ageMin -gt $DashMaxAgeMinutes)) { $visible = $false }
+        <#
+          Two answers, not one.
+
+          "live" is whether this session is a real, running thing worth showing.
+          "visible" is whether you actually get to see it -- live, and not one
+          you put away. They have to stay apart, because the HUD has to be able
+          to say "3 hidden" without counting sessions that ended days ago and
+          only still sit in hidden.json.
+        #>
+        $ignored = $verborgen.ContainsKey([string]$s.session_id)
+
+        $live = (-not $hidden) -and (@('attention','active','done') -contains $state) -and ($alive -ne $false)
+        if ($live -and ($null -eq $alive) -and ($ageMin -gt $DashMaxAgeMinutes)) { $live = $false }
+        $visible = $live -and (-not $ignored)
 
         $opid = 0
         if ($s.PSObject.Properties['owner_pid'] -and $s.owner_pid) { $opid = [int]$s.owner_pid }
@@ -441,20 +529,31 @@ function Get-DashSessions {
             owner_pid  = $opid
             alive      = $alive
             hidden     = $hidden
+            ignored    = $ignored
+            live       = $live
             visible    = $visible
             sort_ts    = $upd
         }
     }
 
+    <#
+      From here on we work on "live" and not on "visible".
+
+      A session you put away still gets its proper name, its tab title and its
+      turn in the /clear merge. It has to: hiding is not deleting, and the
+      moment you bring it back it should be the same row it was -- not a bare
+      folder name that needs another refresh to sort itself out.
+    #>
+
     # The terminal tab title is the real name. Only use it when there is exactly
-    # one visible session in that terminal window -- with several tabs you cannot
+    # one live session in that terminal window -- with several tabs you cannot
     # tell which one the title belongs to.
     $perHost = @{}
-    foreach ($x in ($list | Where-Object { $_.visible -and $_.host_pid -gt 0 })) {
+    foreach ($x in ($list | Where-Object { $_.live -and $_.host_pid -gt 0 })) {
         if (-not $perHost.ContainsKey($x.host_pid)) { $perHost[$x.host_pid] = 0 }
         $perHost[$x.host_pid] = $perHost[$x.host_pid] + 1
     }
-    foreach ($x in ($list | Where-Object { $_.visible -and $_.host_pid -gt 0 })) {
+    foreach ($x in ($list | Where-Object { $_.live -and $_.host_pid -gt 0 })) {
         if ($perHost[$x.host_pid] -ne 1) { continue }
         $info = Get-DashHostInfo $x.host_pid
         if (-not $info) { continue }
@@ -478,7 +577,7 @@ function Get-DashSessions {
     # title) get a short piece of their session_id appended, otherwise you cannot
     # tell which is which.
     $perNaam = @{}
-    foreach ($x in ($list | Where-Object { $_.visible })) {
+    foreach ($x in ($list | Where-Object { $_.live })) {
         if (-not $perNaam.ContainsKey($x.name)) { $perNaam[$x.name] = @() }
         $perNaam[$x.name] += $x
     }
@@ -493,9 +592,9 @@ function Get-DashSessions {
     # /clear gives the same terminal a new session_id: per Claude process (and per
     # folder when the PID is unknown) we keep only the newest.
     $groups = @{}
-    foreach ($x in ($list | Where-Object { $_.visible } | Sort-Object sort_ts -Descending)) {
+    foreach ($x in ($list | Where-Object { $_.live } | Sort-Object sort_ts -Descending)) {
         if ($x.owner_pid -gt 0) { $key = 'p' + $x.owner_pid } else { $key = 'c' + $x.cwd.ToLower() }
-        if ($groups.ContainsKey($key)) { $x.visible = $false } else { $groups[$key] = $true }
+        if ($groups.ContainsKey($key)) { $x.live = $false; $x.visible = $false } else { $groups[$key] = $true }
     }
 
     return ($list | Sort-Object @{Expression='rank'}, @{Expression='sort_ts'; Descending=$true})

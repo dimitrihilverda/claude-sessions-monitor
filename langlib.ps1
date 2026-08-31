@@ -28,6 +28,7 @@ $script:LANGS = @{
         'app.title'            = 'Claude sessions'
         'app.header'           = 'CLAUDE SESSIONS'
         'hud.shortcutDesc'     = 'Claude sessions HUD'
+        'hud.hiddenCount'      = '{0} hidden'
 
         # ---- session states
         'state.attention'      = 'Needs you'
@@ -54,12 +55,18 @@ $script:LANGS = @{
         'empty.none'           = 'No active sessions.'
         'empty.filtered'       = 'No session needs you.'
         'empty.filterHint'     = 'The "needs me only" filter is on - right-click to turn it off.'
+        'empty.hidden'         = 'Every session is hidden.'
+        'empty.hiddenHint'     = 'Right-click > Hide sessions to tick them back on.'
         'empty.beacons'        = '{0} beacons known'
 
         # ---- menu
         'menu.topmost'         = 'Always on top'
         'menu.compact'         = 'Compact rows'
         'menu.onlyAttention'   = 'Only sessions that need me (hides the rest)'
+        'menu.hideList'        = 'Hide sessions'
+        'menu.hideListWith'    = 'Hide sessions ({0} hidden)'
+        'menu.hideNone'        = '(no sessions running)'
+        'menu.showAll'         = 'Show all again ({0})'
         'menu.dashboard'       = 'Open dashboard'
         'menu.address'         = 'Address of this PC'
         'menu.addressWith'     = 'Address of this PC:  {0}'
@@ -107,6 +114,8 @@ $script:LANGS = @{
 
         # ---- notifications
         'notify.waiting'       = 'Claude needs you: {0}'
+        'notify.hidden'        = 'Hidden: {0}'
+        'notify.hiddenBody'    = 'Gone from the HUD, the page and the display. Right-click > Hide sessions to tick it back on.'
         'notify.noWindow'      = 'No window found'
         'notify.noWindowBody'  = 'Could not find the terminal window for this session.'
         'notify.pickWindow'    = 'Pick a window'
@@ -144,6 +153,7 @@ $script:LANGS = @{
         'app.title'            = 'Claude-sessies'
         'app.header'           = 'CLAUDE-SESSIES'
         'hud.shortcutDesc'     = 'Claude-sessies HUD'
+        'hud.hiddenCount'      = '{0} verborgen'
 
         'state.attention'      = 'Aandacht nodig'
         'state.active'         = 'Actief'
@@ -167,11 +177,17 @@ $script:LANGS = @{
         'empty.none'           = 'Geen actieve sessies.'
         'empty.filtered'       = 'Geen sessie vraagt aandacht.'
         'empty.filterHint'     = 'Filter "alleen aandacht nodig" staat aan - rechtermuis om hem uit te zetten.'
+        'empty.hidden'         = 'Alle sessies staan verborgen.'
+        'empty.hiddenHint'     = 'Rechtermuis > Sessies verbergen om ze weer aan te vinken.'
         'empty.beacons'        = '{0} beacons bekend'
 
         'menu.topmost'         = 'Altijd bovenop'
         'menu.compact'         = 'Compacte rijen'
         'menu.onlyAttention'   = 'Alleen aandacht nodig (verbergt de rest)'
+        'menu.hideList'        = 'Sessies verbergen'
+        'menu.hideListWith'    = 'Sessies verbergen ({0} verborgen)'
+        'menu.hideNone'        = '(geen sessies actief)'
+        'menu.showAll'         = 'Alles weer tonen ({0})'
         'menu.dashboard'       = 'Dashboard openen'
         'menu.address'         = 'Adres van deze pc'
         'menu.addressWith'     = 'Adres van deze pc:  {0}'
@@ -217,6 +233,8 @@ $script:LANGS = @{
         'menu.quit'            = 'HUD afsluiten'
 
         'notify.waiting'       = 'Claude wacht op je: {0}'
+        'notify.hidden'        = 'Verborgen: {0}'
+        'notify.hiddenBody'    = 'Weg uit de HUD, de pagina en het schermpje. Rechtermuis > Sessies verbergen om hem weer aan te vinken.'
         'notify.noWindow'      = 'Geen venster gevonden'
         'notify.noWindowBody'  = 'Kon het terminalvenster van deze sessie niet vinden.'
         'notify.pickWindow'    = 'Vensterkeuze'

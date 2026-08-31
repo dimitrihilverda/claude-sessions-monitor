@@ -406,8 +406,21 @@ application.
 
 ### Setting it up
 
+From the release package, install PowerShell and then double-click
+`Install.command`:
+
 ```sh
-brew install powershell                 # PowerShell 7; the code is PowerShell
+brew install --cask powershell   # PowerShell 7; the code is PowerShell
+```
+
+It copies the files to `~/Library/Application Support/ClaudeDeck`, registers the
+hooks, runs the self test and offers to start the web service. The copy matters:
+the hooks store the full path to `beacon.ps1`, so a folder you later clear out
+takes every session with it.
+
+From a git checkout, the same four steps by hand:
+
+```sh
 pwsh -NoProfile -File selftest.ps1      # what works on this machine, and what does not
 pwsh -NoProfile -File install-hooks.ps1 # register the hooks in ~/.claude/settings.json
 pwsh -NoProfile -File session-api.ps1   # the service the display talks to
@@ -429,9 +442,17 @@ two it was.
 ### What is not tested
 
 Everything above compiles and runs on Windows, and the platform-specific halves
-are exercised here — but not one line of the macOS path has run on a Mac. If
-something is wrong, `selftest.ps1` is the place it will show, and the parsing of
-`ps` output is the most likely candidate.
+are exercised here — but not one line of the macOS path has run on a Mac.
+
+The `ps` parsing was the most likely candidate, and it was in fact broken: it
+read the process id out of `$Matches` after two later matches had already
+overwritten it, so every process landed under id 0 and nothing worked. That is
+fixed, and `selftest.ps1` now runs the parser against a captured `ps` listing on
+every platform, so the same class of mistake cannot go unnoticed again.
+
+What still cannot be checked from here is everything that needs the machine
+itself: the permission dialog, `route`, `ifconfig`, `osascript`, and whether
+raising an application actually raises it. `selftest.ps1` is where those report.
 
 ## Requirements
 

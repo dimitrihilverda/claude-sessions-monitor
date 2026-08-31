@@ -10,6 +10,8 @@ the mouse.
 
 ## Installing
 
+### Windows
+
 Double-click **`Install.cmd`**. It asks three things: where it may go, whether
 you want the touchscreen, and whether everything should start when you log in.
 Administrator rights are not needed.
@@ -29,6 +31,32 @@ What the installer does:
 
 Sessions that are already running only pick up the hooks after that session
 restarts.
+
+### macOS
+
+Double-click **`Install.command`**. It needs PowerShell 7 first
+(`brew install --cask powershell`), because this project is written in
+PowerShell.
+
+It copies everything to `~/Library/Application Support/ClaudeDeck`, registers
+the hooks, runs the self test and offers to start the web service. The copy is
+not tidiness: the hooks store the full path to `beacon.ps1`, so running it from
+a Downloads folder you later clear out would stop every session reporting in
+with nothing to say why.
+
+**There is no HUD on a Mac.** It is WinForms, which has no macOS counterpart,
+and a second interface is a second interface to keep in step. What you get
+instead is the same list at `http://localhost:8787/`, and the display.
+
+The first time you tap a row, macOS asks whether your terminal may control
+other applications. Until you agree, nothing is raised. That lives in **System
+Settings > Privacy & Security > Automation**, and some versions want
+**Accessibility** as well. The self test says which of the two it was.
+
+Raising a window is also coarser here. On Windows the right *window* is picked
+by matching the session against every window title; on macOS there is no window
+list to score, so you get the right *application* and which tab is in front
+inside it is up to the application.
 
 ## Using it
 

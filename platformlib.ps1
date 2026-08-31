@@ -111,21 +111,45 @@ function Get-DashProcTableWindows {
   it is a full path and application bundles have spaces in them, so anything
   after the third column belongs to the name.
 #>
-function Get-DashProcTableUnix {
+function Get-DashProcTableUnix([string[]]$Regels) {
     $tab = @{}
-    try {
-        $regels = & ps -Ao 'pid=,ppid=,etime=,comm=' 2>$null
-    } catch { return $tab }
-    foreach ($r in $regels) {
+    <#
+      $Regels is there so the parser can be exercised without a Mac: selftest.ps1
+      feeds it a captured `ps` listing and checks what comes out. That is not
+      decoration -- the $Matches bug below shipped precisely because this half
+      had never been run against real output.
+    #>
+    if (-not $Regels) {
+        try {
+            $Regels = & ps -Ao 'pid=,ppid=,etime=,comm=' 2>$null
+        } catch { return $tab }
+    }
+    foreach ($r in $Regels) {
         if ($r -notmatch '^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+)$') { continue }
-        $naam = $Matches[4].Trim()
+
+        <#
+          Read all four out of $Matches before anything else runs.
+
+          $Matches is one automatic variable for the whole scope, and every -match
+          overwrites it -- including the one two lines down that asks whether the
+          name is a path, and the one inside ConvertFrom-DashElapsed. Reading
+          $Matches[1] after those gave $null, so [int] made it 0 and every process
+          on the machine landed under key 0 with parent 0: no session ever looked
+          alive, and nothing could be raised.
+        #>
+        $procId = [int]$Matches[1]
+        $ouder  = [int]$Matches[2]
+        $etime  = [string]$Matches[3]
+        $naam   = $Matches[4].Trim()
+
         # /Applications/Ghostty.app/Contents/MacOS/ghostty -> ghostty, so the
         # name means the same thing it does on Windows.
         $leaf = $naam
         try { if ($naam -match '[\\/]') { $leaf = Split-Path -Leaf $naam } } catch { }
-        $tab[[int]$Matches[1]] = @{
-            Parent   = [int]$Matches[2]
-            Start    = ConvertFrom-DashElapsed $Matches[3]
+
+        $tab[$procId] = @{
+            Parent   = $ouder
+            Start    = ConvertFrom-DashElapsed $etime
             Name     = $leaf
             FullName = $naam
         }
@@ -236,6 +260,90 @@ end tell
         Write-Verbose ("osascript failed: " + $_.Exception.Message)
         return $false
     }
+}
+
+# ---- the address the display has to be told about ---------------------------
+<#
+  Which of our addresses is worth telling the display about?
+
+  Not simply the first: a Windows machine also carries 172.19.x from WSL and
+  192.168.56.x from VirtualBox, and a Mac on a VPN or with Docker running is no
+  better. The address on the interface the default route runs over is the one
+  reachable from a shelf across the room, so both halves answer that question
+  and fall back to "anything that is not loopback" only when there is no route.
+
+  This lives here and not in session-api.ps1 because the Windows half was written
+  in Get-NetIPConfiguration, which on a Mac is not a cmdlet that returns nothing
+  -- it is a command that does not exist. That is a platform seam, and platform
+  seams belong in this file.
+#>
+function Get-DashLanAddressWindows {
+    try {
+        $cfg = @(Get-NetIPConfiguration -ErrorAction Stop |
+                 Where-Object { $_.IPv4DefaultGateway -and $_.IPv4Address })
+        if ($cfg.Count) { return [string]$cfg[0].IPv4Address[0].IPAddress }
+    } catch { }
+    try {
+        return [string](@(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+                Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
+                Select-Object -ExpandProperty IPAddress)[0])
+    } catch { return '' }
+}
+
+<#
+  `route -n get default` names the interface the traffic actually leaves by, and
+  `ipconfig getifaddr en0` gives that interface's address without parsing a table
+  whose shape changes between releases. Both are macOS' own answers to exactly
+  this question.
+
+  ifconfig is the fallback for the case where there is no default route at all,
+  and for a Linux box that has no `ipconfig`.
+#>
+function Get-DashLanAddressUnix {
+    try {
+        foreach ($regel in @(& route -n get default 2>$null)) {
+            if ($regel -match '^\s*interface:\s*(\S+)') {
+                $ip = @(& ipconfig getifaddr $Matches[1] 2>$null)[0]
+                if ($ip) { return ([string]$ip).Trim() }
+            }
+        }
+    } catch { }
+    try {
+        foreach ($regel in @(& ifconfig 2>$null)) {
+            if ($regel -match '^\s*inet\s+(\d+\.\d+\.\d+\.\d+)') {
+                $ip = $Matches[1]
+                if ($ip -notlike '127.*' -and $ip -notlike '169.254.*') { return $ip }
+            }
+        }
+    } catch { }
+    return ''
+}
+
+function Get-DashLanAddress {
+    if ($DashOnWindows) { return (Get-DashLanAddressWindows) }
+    return (Get-DashLanAddressUnix)
+}
+
+# Every address this machine has, for the "which one do I type in" line the API
+# prints when it starts. Same story: the Windows cmdlet does not exist elsewhere.
+function Get-DashLocalAddresses {
+    if ($DashOnWindows) {
+        try {
+            return @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+                     Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
+                     Select-Object -ExpandProperty IPAddress)
+        } catch { return @() }
+    }
+    $uit = @()
+    try {
+        foreach ($regel in @(& ifconfig 2>$null)) {
+            if ($regel -match '^\s*inet\s+(\d+\.\d+\.\d+\.\d+)') {
+                $ip = $Matches[1]
+                if ($ip -notlike '127.*' -and $ip -notlike '169.254.*') { $uit += $ip }
+            }
+        }
+    } catch { }
+    return @($uit | Sort-Object -Unique)
 }
 
 # ---- the serial port the display hangs off ---------------------------------

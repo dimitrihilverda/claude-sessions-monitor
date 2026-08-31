@@ -666,25 +666,9 @@ function Send-DashSerialLine([string]$line) {
     try { $script:ser.Write($line + "`n") } catch { Close-DashSerial 'write failed' }
 }
 
-<#
-  Which of our addresses is worth telling the display about?
-
-  Not simply the first: this machine also has 172.19.112.1 from WSL and
-  192.168.56.1 from VirtualBox, and neither is reachable from a shelf across the
-  room. The one with a default gateway is the one on the real network.
-#>
-function Get-DashLanAddress {
-    try {
-        $cfg = @(Get-NetIPConfiguration -ErrorAction Stop |
-                 Where-Object { $_.IPv4DefaultGateway -and $_.IPv4Address })
-        if ($cfg.Count) { return [string]$cfg[0].IPv4Address[0].IPAddress }
-    } catch { }
-    try {
-        return [string](@(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
-                Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
-                Select-Object -ExpandProperty IPAddress)[0])
-    } catch { return '' }
-}
+# Which of our addresses is worth telling the display about: platformlib.ps1
+# answers that, because the two halves of the question are different commands on
+# Windows and on a Mac.
 
 <#
   Every network this machine has a password for, newest-looking first.
@@ -834,9 +818,7 @@ try { $listener.Start() } catch {
     exit 1
 }
 
-$ips = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-         Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
-         Select-Object -ExpandProperty IPAddress)
+$ips = @(Get-DashLocalAddresses)
 Write-Host "Claude sessie-API draait op poort $Port"
 foreach ($ip in $ips) { Write-Host "  http://$($ip):$Port/cyd.txt" }
 Write-Host 'Stoppen met Ctrl+C.'

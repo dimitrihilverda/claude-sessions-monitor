@@ -14,9 +14,10 @@ HIER = os.path.dirname(os.path.abspath(__file__))
 UIT  = sys.argv[1] if len(sys.argv) > 1 else HIER
 NAAM = "ClaudeDeck"
 
-# (source, path inside the zip)
+# (source, path inside the zip[, executable])
 BESTANDEN = [
     ("installer/Install.cmd",     "Install.cmd"),
+    ("installer/Install.command", "Install.command", True),
     ("installer/install.ps1",    "install.ps1"),
     ("installer/uninstall.ps1",  "uninstall.ps1"),
     ("installer/README-installer.md", "README-installer.md"),
@@ -48,11 +49,23 @@ OVERSLAAN = {"preview.png"}   # stays in the repo, but not in the zip
 OVERSLAAN_MAPPEN = {"build", "build-s3", "__pycache__"}
 
 
-def voeg_toe(zf, bron, doel):
+def voeg_toe(zf, bron, doel, uitvoerbaar=False):
     if not os.path.exists(bron):
         print("  ! missing:", bron)
         return 0
-    zf.write(bron, "%s/%s" % (NAAM, doel))
+    naam = "%s/%s" % (NAAM, doel)
+    if uitvoerbaar:
+        # Install.command has to be double-clickable straight out of the zip,
+        # and that is the execute bit. zf.write cannot carry it over from a
+        # Windows checkout, where the file has no such bit to begin with, so
+        # we set it on the entry by hand: 0o100755 is "regular file, rwxr-xr-x".
+        info = zipfile.ZipInfo.from_file(bron, naam)
+        info.external_attr = 0o100755 << 16
+        info.compress_type = zipfile.ZIP_DEFLATED
+        with open(bron, "rb") as fh:
+            zf.writestr(info, fh.read())
+    else:
+        zf.write(bron, naam)
     return os.path.getsize(bron)
 
 
@@ -92,8 +105,10 @@ def main():
     zippad = os.path.join(UIT, NAAM + ".zip")
     totaal = 0
     with zipfile.ZipFile(zippad, "w", zipfile.ZIP_DEFLATED) as zf:
-        for bron, doel in BESTANDEN:
-            totaal += voeg_toe(zf, os.path.join(HIER, bron), doel)
+        for regel in BESTANDEN:
+            bron, doel = regel[0], regel[1]
+            uitvoerbaar = len(regel) > 2 and regel[2]
+            totaal += voeg_toe(zf, os.path.join(HIER, bron), doel, uitvoerbaar)
         for bronmap, doelmap in MAPPEN:
             vol = os.path.join(HIER, bronmap)
             if not os.path.isdir(vol):

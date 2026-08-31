@@ -169,6 +169,47 @@ $args_ = Get-DashProcArgs $PID
 if ($args_) { Report 'command line of a process' 'ok' ($args_.Substring(0, [Math]::Min(60, $args_.Length))) }
 else { Report 'command line of a process' 'warn' 'empty' "an editor's agent session cannot be told apart from your own" }
 
+<#
+  ---- 5b. the ps parser, against output we captured ---------------------------
+
+  This one runs on every platform, and on Windows it is the only part of the Mac
+  path that can be checked at all. It earns its place: the parser used to read
+  the pid out of $Matches after two further -match calls had overwritten it, so
+  every process landed under key 0 and nothing on a Mac worked -- no session ever
+  looked alive, nothing could be raised. A machine with a real `ps` would have
+  said so instantly; nobody had one. A captured listing costs nothing and says
+  the same thing.
+#>
+$psVoorbeeld = @(
+    '    1     0 15-03:22:41 /sbin/launchd'
+    ' 1204     1 2-01:15:09 /Applications/Ghostty.app/Contents/MacOS/ghostty'
+    ' 1310  1204    01:15:09 /bin/zsh'
+    ' 1355  1310       12:03 /opt/homebrew/bin/node'
+    ' 1402  1310    00:00:04 /Applications/Visual Studio Code.app/Contents/MacOS/Electron'
+)
+$proef = Get-DashProcTableUnix $psVoorbeeld
+$klachten = @()
+if ($proef.Count -ne 5)                  { $klachten += "$($proef.Count) rows instead of 5" }
+if (-not $proef.ContainsKey(1204))       { $klachten += 'pid 1204 is missing -- the pid column is not being read' }
+elseif ($proef[1204].Name -ne 'ghostty') { $klachten += "name came out as '$($proef[1204].Name)'" }
+if ($proef.ContainsKey(1310) -and $proef[1310].Parent -ne 1204) { $klachten += 'the parent column is wrong' }
+# an application bundle has spaces in its path, so the name is everything after
+# the third column and not just the next word
+if ($proef.ContainsKey(1402) -and $proef[1402].Name -ne 'Electron') { $klachten += 'a name with a space in its path is truncated' }
+if ($klachten.Count) {
+    Report 'ps output parses' 'fail' ($klachten -join '; ') 'Get-DashProcTableUnix in platformlib.ps1'
+} else {
+    Report 'ps output parses' 'ok' '5 rows, names, parents and paths with spaces'
+}
+
+# ---- 5c. the address the display has to be told about ------------------------
+$lan = Get-DashLanAddress
+if ($lan) {
+    Report 'address of this machine' 'ok' ($lan + ':' + $Port)
+} else {
+    Report 'address of this machine' 'warn' 'none found' 'a browser here still works; the display needs an address to reach'
+}
+
 # ---- 6. reading sessions ----------------------------------------------------
 try {
     . (Join-Path $Root 'sessionlib.ps1')

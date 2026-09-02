@@ -34,7 +34,7 @@ if [ -z "$PWSH" ]; then
     fout 'PowerShell 7 is not installed.'
     zeg 'This project is written in PowerShell, so it needs pwsh:'
     zeg ''
-    zeg '    brew install --cask powershell'
+    zeg '    brew install powershell'
     zeg ''
     zeg 'Then run this installer again.'
     echo
@@ -88,10 +88,38 @@ echo
 echo
 zeg 'If anything above says FAIL, that output is the thing to send back.'
 
-# ---- 5. the web service -----------------------------------------------------
+# ---- 5. the floating window -------------------------------------------------
+kop 'The floating window'
+if [ ! -d "$BRON/hud-macos" ]; then
+    zeg 'Not in this package.'
+elif ! command -v swiftc >/dev/null 2>&1; then
+    zeg 'Skipped: no Swift compiler here.'
+    zeg 'The window is native AppKit, so it needs the Command Line Tools:'
+    zeg ''
+    zeg '    xcode-select --install'
+    zeg ''
+    zeg 'Then run hud-macos/build.sh install. Xcode itself is not needed.'
+else
+    zeg 'A window that floats above everything, listing your sessions.'
+    zeg 'Built here from source; it needs no Xcode, only the Command Line Tools.'
+    echo
+    read -r -p '  Build and install it? [Y/n] ' hudantwoord
+    case "$hudantwoord" in
+        [Nn]*) zeg 'Skipped. hud-macos/build.sh install does it later.' ;;
+        *)
+            if (cd "$BRON/hud-macos" && ./build.sh install); then
+                zeg 'The window is up. Right-click it for the menu.'
+            else
+                fout 'Building the window failed. The rest of the install is fine.'
+            fi
+            ;;
+    esac
+fi
+
+# ---- 6. the web service -----------------------------------------------------
 kop 'The web service'
-zeg 'This is what the display and your phone talk to, and it is also how you'
-zeg 'see your sessions on a Mac -- there is no floating HUD here.'
+zeg 'This is what the display, your phone and the window above all talk to.'
+zeg 'Without it the window has nothing to show.'
 echo
 zeg "  \"$PWSH\" -NoProfile -File \"$DOEL/session-api.ps1\""
 echo

@@ -305,6 +305,13 @@ because the two boards present differently — the CYD through its CH340, the
 Guition through the ESP32-S3's own USB. With both plugged in the CYD wins, so a
 machine that has been driving one carries on driving it.
 
+Being the right chip is not enough to get claimed, though. Every ESP32-S3 in the
+world has the same vendor id as the Guition, and a bench with other projects on
+it is the normal case — so the service asks each candidate who it is, and keeps
+only the port that answers with the display's firmware version. A board that
+stays quiet is left alone within the second, and stops being asked at all after
+three tries. Your other boards stay flashable while the display keeps running.
+
 One consequence worth knowing: the service holds the COM port, so a flash or a
 serial monitor fails while it is attached. The HUD's right-click menu has
 **"Release the USB port"** for exactly that — it lets go for a minute and

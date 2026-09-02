@@ -120,7 +120,10 @@ Nothing to set up. `session-api.ps1` looks for the board by chip rather than by
 port number (this one turned up as COM12 one day and COM16 the next), attaches,
 and pushes the identical `/cyd.txt` payload every three seconds. Two vendor ids,
 because there are two boards: `1A86` is the CH340 in front of the CYD, `303A` is
-Espressif's own, which the S3 speaks directly over its native USB. The display
+Espressif's own, which the S3 speaks directly over its native USB. A matching
+vendor id only earns a port a `?FW`; the port is kept only if the board answers
+`@FW <version>`, so your other ESP32-S3s — same vendor id, different project —
+are handed back within the second and can still be flashed. The display
 prefers whatever arrived over serial while it is less than ten seconds old, so:
 
 - plugged into the PC → it uses the cable, and skips Wi-Fi entirely

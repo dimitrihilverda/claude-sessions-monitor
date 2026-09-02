@@ -232,9 +232,23 @@ It finds the port by chip rather than by number, because this board turned up as
 COM12 one day and COM16 the next. Two vendor ids: `VID_1A86` for the CH340 in
 front of the CYD, `VID_303A` for the S3, which speaks USB itself. The PnP query for that costs about
 a second, so `GetPortNames()` is the cheap gate and the lookup only runs when the
-set of ports actually changes. The port is opened with DTR and RTS off: on a CH340
-those drive the auto-reset circuit, and leaving them on reboots the display every
-time the service starts.
+set of ports actually changes.
+
+A vendor match only makes a port a candidate, though, and treating it as proof
+cost a day: `VID_303A` is on every ESP32-S3, so the service was claiming other
+projects' boards within seconds of plugging them in and flashing them failed with
+access-denied. So the candidate has to answer for itself. It gets a `?FW` and
+about a second to reply `@FW <version>` — which the firmware has always done, and
+which we asked on every open anyway — and only then is the port kept. Anything
+that stays quiet is somebody else's board and is handed straight back; after
+three refusals we stop knocking altogether until it is unplugged or ten minutes
+have gone by. Ports from any other vendor are never opened at all, so a
+Bluetooth COM port or an FTDI board is not even a candidate. `-SerialPort COM7`
+skips the whole scan if you know better.
+
+Probe and open both use DTR and RTS off: on a CH340 those drive the auto-reset
+circuit, and leaving them on reboots the board every time the service starts —
+which for a board that is not even ours would be worse than rude.
 
 Because a serial port belongs to one program at a time, the service holding it
 means a flash fails. `/serial/release` lets go for a minute and reattaches by

@@ -46,7 +46,13 @@ param(
     # The USB bridge: same payload over the cable, for a network where 8787 is
     # blocked. -SerialBridge:$false leaves the COM port alone entirely.
     [bool]$SerialBridge = $true,
-    [int]$SerialPushMs = 3000
+    [int]$SerialPushMs = 3000,
+    # Pin the display to one port and skip the scan entirely. Only worth it if
+    # the scan picks wrong; it normally finds the board by chip and handshake.
+    [string]$SerialPort = '',
+    # How long a candidate port gets to answer '?FW' before we hand it back to
+    # whoever else it belongs to.
+    [int]$SerialProbeMs = 900
 )
 $ErrorActionPreference = 'Continue'
 
@@ -557,7 +563,9 @@ $script:serLastTry   = [datetime]::MinValue
 $script:serReleaseTo = [datetime]::MinValue
 $script:serBuf       = ''
 $script:serPortsSeen = ''
-$script:serCh340     = ''
+$script:serFound     = ''
+$script:serVendor    = @()
+$script:serReject    = @{}
 $script:serWifiAt    = [datetime]::MinValue
 
 <#
@@ -576,37 +584,149 @@ $script:serWifiAt    = [datetime]::MinValue
   The CYD comes first when both are plugged in, so a machine that has been
   driving one all along keeps driving it.
 
-  On macOS there is nothing to look up. The device name already says what it is
-  (cu.usbserial for the CH340, cu.usbmodem for the S3's native USB), so the
-  candidate list from platformlib is the answer. Note cu.* and not tty.*: opening
+  But the vendor id alone is not proof, and taking it as proof cost a day.
+  VID_303A is on every ESP32-S3 on the bench, and this service was holding other
+  people's boards hostage: a new board enumerated, got claimed within seconds as
+  "the display", and flashing failed with access-denied until the service died.
+  So a vendor match only makes a port a *candidate*. What settles it is the
+  display answering: '?FW' goes out, and only a board that replies '@FW <ver>'
+  gets kept. Anything else is somebody else's board and is let go within the
+  second -- three such answers and we stop knocking on that port altogether
+  until it is unplugged, or ten quiet minutes have passed.
+
+  That reply is not an extra protocol: the sketch has always answered ?FW, and
+  we asked it on every open anyway. This just moves the question one step
+  earlier, to before we decide the port is ours, and records the version the
+  probe already heard.
+
+  -SerialPort COM7 skips all of it and pins one port, for the case where you
+  know better than the scan.
+
+  On macOS there is nothing to look up, so every cu.* candidate gets the same
+  question -- the name says which chip (cu.usbserial for the CH340, cu.usbmodem
+  for the S3's native USB) but not whose board. Note cu.* and not tty.*: opening
   tty.* blocks until carrier detect, which for a board that is not asserting it
   means hanging forever.
 #>
-function Find-DashSerialPort {
-    $kandidaten = @(Get-DashSerialCandidates)
-    $namen = ($kandidaten | Sort-Object) -join ','
-    if ($namen -eq $script:serPortsSeen) { return $script:serCh340 }
-    $script:serPortsSeen = $namen
-    $script:serCh340 = ''
+$SerialProbeVids = 'VID_1A86', 'VID_303A'
 
-    if (-not $DashOnWindows) {
-        if ($kandidaten.Count -gt 0) { $script:serCh340 = $kandidaten[0] }
-        return $script:serCh340
-    }
-
+# Candidate ports, best first. The PnP query costs about a second, so it is
+# cached until the set of ports changes; GetPortNames() costs 10 ms and is the
+# gate. Ports from any other vendor are dropped here and never opened at all.
+function Get-DashSerialCandidatesByVendor([string[]]$kandidaten) {
+    if (-not $DashOnWindows) { return @($kandidaten) }
+    $uit = @()
     try {
         $d = @(Get-CimInstance Win32_PnPEntity -ErrorAction Stop |
                Where-Object { $_.PNPDeviceID -match 'VID_(1A86|303A)' -and $_.Name -match 'COM\d+' })
-        foreach ($vid in @('VID_1A86', 'VID_303A')) {
+        foreach ($vid in $SerialProbeVids) {
             foreach ($x in $d) {
                 if ($x.PNPDeviceID -notmatch $vid) { continue }
                 $m = [regex]::Match($x.Name, 'COM\d+')
-                if ($m.Success) { $script:serCh340 = $m.Value; break }
+                if ($m.Success -and $kandidaten -contains $m.Value -and $uit -notcontains $m.Value) {
+                    $uit += $m.Value
+                }
             }
-            if ($script:serCh340) { break }
         }
-    } catch { }
-    return $script:serCh340
+        return @($uit)
+    } catch {
+        # No PnP answer means no way to narrow it down. Better to ask every port
+        # the question than to drive no display at all; the probe is what keeps
+        # that polite, and three refusals end it.
+        Write-DashLog 'serial: PnP query failed, falling back to asking every port'
+        return @($kandidaten)
+    }
+}
+
+<#
+  Is the display on this port? Open it, ask, and hand it straight back.
+
+  DTR and RTS stay off for the same reason as in Open-DashSerial: asserting them
+  reboots a CH340 board, and a probe must not reset somebody else's board any
+  more than it may keep its port.
+#>
+function Test-DashSerialPort([string]$poort) {
+    $p = $null
+    try {
+        $p = New-Object System.IO.Ports.SerialPort $poort, 115200, 'None', 8, 'One'
+        $p.DtrEnable    = $false
+        $p.RtsEnable    = $false
+        $p.ReadTimeout  = 50
+        $p.WriteTimeout = 500
+        $p.NewLine      = "`n"
+        $p.Open()
+        try { $p.DiscardInBuffer() } catch { }
+        $p.WriteLine('?FW')
+        $eind = [datetime]::UtcNow.AddMilliseconds($SerialProbeMs)
+        $buf = ''
+        $herhaald = $false
+        while ([datetime]::UtcNow -lt $eind) {
+            try { $buf += $p.ReadExisting() } catch { }
+            foreach ($l in ($buf -split "`n")) {
+                if ($l -match '^@FW\s+(\S+)') { return $Matches[1] }
+            }
+            # Native USB on the S3 only wakes up once the host has the port open,
+            # so a first question can land before anyone is listening. Ask again
+            # halfway through rather than writing the board off for it.
+            if (-not $herhaald -and ([datetime]::UtcNow.AddMilliseconds($SerialProbeMs / 2) -gt $eind)) {
+                $herhaald = $true
+                try { $p.WriteLine('?FW') } catch { }
+            }
+            Start-Sleep -Milliseconds 25
+        }
+        return ''
+    } catch {
+        return ''
+    } finally {
+        if ($null -ne $p) {
+            try { $p.Close() } catch { }
+            try { $p.Dispose() } catch { }
+        }
+    }
+}
+
+function Find-DashSerialPort {
+    $kandidaten = @(Get-DashSerialCandidates)
+    $namen = ($kandidaten | Sort-Object) -join ','
+    if ($namen -ne $script:serPortsSeen) {
+        $script:serPortsSeen = $namen
+        $script:serFound = ''
+        $script:serVendor = @(Get-DashSerialCandidatesByVendor $kandidaten)
+        # A port that went away loses its refusals: the name may come back as a
+        # different board, and the one that returned may well be the display.
+        foreach ($k in @($script:serReject.Keys)) {
+            if ($kandidaten -notcontains $k) { $script:serReject.Remove($k) }
+        }
+    }
+    if ($script:serFound) { return $script:serFound }
+
+    if ($SerialPort) {
+        if ($kandidaten -contains $SerialPort) { $script:serFound = $SerialPort }
+        return $script:serFound
+    }
+
+    foreach ($poort in $script:serVendor) {
+        $afgewezen = $script:serReject[$poort]
+        if ($null -ne $afgewezen) {
+            if ($afgewezen.n -lt 3) { }
+            elseif (([datetime]::UtcNow - $afgewezen.at).TotalMinutes -lt 10) { continue }
+            else { $script:serReject.Remove($poort); $afgewezen = $null }
+        }
+
+        $fw = Test-DashSerialPort $poort
+        if ($fw) {
+            $script:serReject.Remove($poort)
+            Set-DashDisplayFw $fw 'usb'
+            $script:serFound = $poort
+            return $poort
+        }
+
+        $n = 1
+        if ($null -ne $afgewezen) { $n = [int]$afgewezen.n + 1 }
+        $script:serReject[$poort] = @{ n = $n; at = [datetime]::UtcNow }
+        if ($n -eq 3) { Write-DashLog "serial: $poort never answered, leaving it to its owner" }
+    }
+    return ''
 }
 
 function Close-DashSerial([string]$reden) {

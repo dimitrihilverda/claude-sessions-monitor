@@ -12,6 +12,7 @@ project surfaces that state in three places that share one source of truth.
 |---|---|
 | **Floating HUD** | A small always-on-top window on your desktop listing every session |
 | **Cheap Yellow Display** | A £10 ESP32 touchscreen on your desk, with three physical buttons |
+| **Guition JC3248W535C** | The same thing on twice the pixels, with capacitive touch — [the nicer screen](#the-bigger-screen-guition-jc3248w535c) |
 | **Web page** | The same list on your phone or tablet, on your own network |
 
 Everything runs locally. Nothing leaves your machine: session state comes from
@@ -37,7 +38,7 @@ that blocks the port does not leave you with a blank screen.
                    /cyd.txt over      the same payload
                    Wi-Fi (HTTP)       pushed over USB
                           \               /
-                       Cheap Yellow Display
+              the display: a CYD, or a Guition S3
 ```
 
 The display takes whichever of those two is available, so a network that
@@ -51,6 +52,8 @@ blocks the port does not leave you with a blank screen.
 - [Session states](#session-states)
 - [Quick start](#quick-start)
 - [The Cheap Yellow Display](#the-cheap-yellow-display)
+- [The bigger screen: Guition JC3248W535C](#the-bigger-screen-guition-jc3248w535c)
+- [When the network is not an option](#when-the-network-is-not-an-option)
 - [Physical buttons and actions](#physical-buttons-and-actions)
 - [Security: read this before exposing the API](#security-read-this-before-exposing-the-api)
 - [Language](#language)
@@ -179,33 +182,10 @@ your PC — the same thing clicking in the HUD does.
 > when the window was already in front, which is the one case where you did not
 > need it.
 
-### The other board: Guition JC3248W535C
-
-The same firmware also runs on a Guition JC3248W535C — an ESP32-S3 with a
-480×320 QSPI panel and capacitive touch. It shows five rows instead of four and
-sets its type a size larger; everything else behaves identically, and the
-[web flasher](https://dimitrihilverda.github.io/claude-sessions-monitor/) works
-out which of the two you plugged in.
-
-Three differences worth knowing. It has no RGB LED and no speaker on a plain pin,
-so the status light and the attention beep are simply absent there. Its panel
-cannot rotate in hardware and dislikes partial writes, so the whole frame is
-drawn in PSRAM and pushed at once — which means a build without PSRAM enabled
-will not run, and says so on the serial port rather than showing a blank screen.
-And it speaks USB itself instead of through a CH340, so it needs no driver and
-turns up as an Espressif device rather than a serial adapter.
-
-> **Its touch controller answers even when nobody is touching it.** Asked out of
-> the blue, the AXS15231B replies with whatever it last had — measured here, a
-> point that never changes. So the firmware reads it only after its interrupt
-> line has fallen, and checks that the answer could be a finger at all. Without
-> both, the screen reads a permanent press along the top edge, opens its own
-> setup portal a second after every boot, and from inside that portal it never
-> looks at the cable again.
-
-The easter egg is the CYD's alone: it talks to TFT_eSPI directly instead of going
-through the drawing layer, which is exactly the kind of shortcut a second board
-turns into work.
+This is not the only board it drives, and no longer the one to buy: the same
+firmware runs on a Guition JC3248W535C, on twice the pixels and with capacitive
+touch. See [The bigger screen](#the-bigger-screen-guition-jc3248w535c) below —
+everything in this section applies to both unless it says otherwise.
 
 ### Using it
 
@@ -259,6 +239,10 @@ short version:
 3. Flash `cyd/claude_hud_cyd/claude_hud_cyd.ino` (board: ESP32 Dev Module)
 4. Start the web service on your PC
 
+That is the CYD. For the Guition S3 it is the same sketch with other build
+settings and another library —
+[Hanging it on](#hanging-it-on) has the exact line.
+
 You do **not** put your Wi-Fi password in the sketch. On first boot the display
 brings up its own network called `Claude-Deck`; join it with your phone, and a
 page opens where you pick your network, enter the password, and give it the
@@ -287,6 +271,94 @@ the parametric generator that produced the STLs.
 > `User_Setup_CYD.h` sets `TFT_INVERSION_ON` for this reason; none of the
 > ILI9341 init sequences in TFT_eSPI send an inversion command themselves. This
 > is worth knowing because it makes colour changes look like nothing happened.
+
+## The bigger screen: Guition JC3248W535C
+
+You can hang a Guition JC3248W535C on this instead, and if you are buying a
+board today, buy this one. It is an ESP32-S3 with an AXS15231B panel over QSPI:
+480×320 where the CYD is 320×240, which is exactly twice the pixels, with
+capacitive touch instead of a resistive layer you have to press with a
+fingernail. Same firmware, same flasher, same service — plug it in and it is
+simply a nicer thing to look at across the desk.
+
+| | Cheap Yellow Display | Guition JC3248W535C |
+|---|---|---|
+| Chip | ESP32 | ESP32-S3, PSRAM required |
+| Panel | 320×240 ILI9341 over SPI | 480×320 AXS15231B over QSPI |
+| Touch | resistive, XPT2046 on SPI | capacitive, on the panel controller itself |
+| Sessions on screen | four rows of 41 px | five rows of 46 px |
+| Type | TFT_eSPI fonts, proportional | built-in font at 12×16 and 18×24, monospaced |
+| USB | CH340 bridge, may want a driver | native USB, no driver at all |
+| Status LED | RGB LED on the board | none |
+| Attention beep | speaker on a plain pin | none — audio here is I2S into an NS4168 |
+| Physical buttons | three on the JST connectors, plus BOOT | BOOT only |
+| Easter egg | yes | no |
+| Drawing | straight to the glass | full frame in PSRAM, pushed in one go |
+
+Where the extra pixels go: a fifth session on screen, a taller header, type one
+size up, and truncation limits that are exact rather than careful. The CYD's two
+fonts are proportional, so a session name is cut at 34 characters to be safe —
+often earlier than it had to be. On the S3 a row is 468 px wide less a 16 px
+indent at 12 px per character, so 29 characters is the real number and the line
+fills out to it every time; the reason line is 37, measured the same way.
+
+What you give up is small but real. No RGB status light and no beep, because
+there is no LED and no speaker on a plain pin — audio on this board goes through
+an I2S amplifier, which is a different mechanism entirely and not worth carrying
+for one beep. One button instead of three, unless you wire your own. And no
+cracktro: the easter egg talks to TFT_eSPI directly instead of going through the
+drawing layer, which is exactly the kind of shortcut a second board turns into
+work.
+
+One honest point in the CYD's favour: its type is proportional and the S3's is
+the library's built-in 6×8 font scaled up, which is plainer up close. A
+proportional face generated from a TTF would fix that and is the obvious next
+improvement, at about 90 KB of flash per face.
+
+> **Its touch controller answers even when nobody is touching it.** Asked out of
+> the blue, the AXS15231B replies with whatever it last had — measured here, a
+> point that never changes. So the firmware reads it only after its interrupt
+> line has fallen, and checks that the answer could be a finger at all. Without
+> both, the screen reads a permanent press along the top edge, opens its own
+> setup portal a second after every boot, and from inside that portal it never
+> looks at the cable again.
+
+### Hanging it on
+
+1. **Plug it in.** It speaks USB itself rather than through a CH340, so there is
+   no driver to install and it turns up as an Espressif device.
+2. **Flash it** from
+   [the web flasher](https://dimitrihilverda.github.io/claude-sessions-monitor/).
+   Nothing to choose: the manifest carries both builds and the page reads the
+   chip family off the board you plugged in. It carries the offsets too, which
+   matters more than it sounds — the bootloader sits at 0x1000 on the ESP32 and
+   at 0x0 on the S3, and getting that wrong gives a board that flashes without
+   complaint and never boots.
+3. **Start the service** as usual. It finds the board by chip and then asks it
+   who it is, so the other ESP32-S3s on your bench keep their ports — see
+   [When the network is not an option](#when-the-network-is-not-an-option).
+4. **Give it a network**, through the portal on first boot, or let the cable
+   hand yours over on Windows. Both work exactly as they do on the CYD.
+
+From the Arduino IDE it wants the S3's build settings, and PSRAM is not optional
+there: the 480×320 frame buffer is 300 KB and does not fit in internal RAM next
+to Wi-Fi. Without it the firmware refuses to start and says so on the serial
+port, rather than showing you a blank screen. CI builds it with exactly this,
+which is the shortest correct answer to "what do I set":
+
+```bash
+arduino-cli compile \
+  --fqbn "esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=huge_app,FlashMode=qio,CPUFreq=240,USBMode=hwcdc,CDCOnBoot=cdc" \
+  --build-property "compiler.cpp.extra_flags=-DBOARD_KIND=BOARD_S3" \
+  cyd/claude_hud_cyd
+```
+
+`BOARD_KIND=BOARD_S3` is the part that matters in the sketch: it picks the
+drawing backend in `gfx.h` and the layout metrics in `board.h`. Leave it out and
+you get a CYD build, which compiles happily and draws nothing on this panel.
+This board does not use TFT_eSPI at all — it goes through **GFX Library for
+Arduino** — so `User_Setup_CYD.h` and the colour-inversion note above are the
+CYD's business, not yours here.
 
 ## When the network is not an option
 

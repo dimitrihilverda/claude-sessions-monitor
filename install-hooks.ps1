@@ -23,6 +23,25 @@ if ($DashOnWindows) {
     $cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$beacon`""
 } else {
     $exe = (Get-Process -Id $PID).Path
+
+    <#
+      Which pwsh, exactly. The running process is the honest answer but not a
+      durable one: under Homebrew it is
+      /opt/homebrew/Cellar/powershell/7.6.5/libexec/pwsh, and that path stops
+      existing the first time PowerShell is upgraded. The hook then points at
+      nothing and every session quietly stops reporting in, with the same
+      silence as a deleted install folder.
+
+      So prefer a symlink that survives the upgrade -- but only after asking it
+      whether it is the same PowerShell, because on a machine with two of them
+      the one you started is the one you meant.
+    #>
+    foreach ($cand in '/opt/homebrew/bin/pwsh', '/usr/local/bin/pwsh', '/usr/bin/pwsh') {
+        if ($cand -eq $exe) { break }
+        if (-not (Test-Path $cand)) { continue }
+        $v = & $cand -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>$null
+        if ($v -eq $PSVersionTable.PSVersion.ToString()) { $exe = $cand; break }
+    }
     if (-not $exe) { $exe = 'pwsh' }
     $cmd = "`"$exe`" -NoProfile -File `"$beacon`""
 }
@@ -57,13 +76,27 @@ foreach ($ev in $events) {
         $settings.hooks | Add-Member -NotePropertyName $ev -NotePropertyValue @($entry)
         Write-Host "Added:        $ev"
     } else {
-        $already = $false
+        <#
+          An existing beacon hook is not necessarily a working one. It carries
+          the full path to the interpreter and to beacon.ps1, and either can
+          have moved since: PowerShell upgraded out from under a Cellar path,
+          or the install folder shifted. Leaving it alone because the word
+          beacon appears in it is how a reinstall reports success and changes
+          nothing, which is the one thing someone reinstalling is trying to
+          rule out. So rewrite it when it differs.
+        #>
+        $found = $false
+        $stale = $false
         foreach ($e in @($prop.Value)) {
             foreach ($h in @($e.hooks)) {
-                if ("$($h.command)" -like '*beacon.ps1*') { $already = $true }
+                if ("$($h.command)" -notlike '*beacon.ps1*') { continue }
+                $found = $true
+                if ("$($h.command)" -ne $cmd) { $h.command = $cmd; $stale = $true }
             }
         }
-        if ($already) {
+        if ($stale) {
+            Write-Host "Updated:      $ev"
+        } elseif ($found) {
             Write-Host "Already set:  $ev"
         } else {
             $prop.Value = @($prop.Value) + @($entry)

@@ -35,7 +35,7 @@ restarts.
 ### macOS
 
 Double-click **`Install.command`**. It needs PowerShell 7 first
-(`brew install --cask powershell`), because this project is written in
+(`brew install powershell`), because this project is written in
 PowerShell.
 
 It copies everything to `~/Library/Application Support/ClaudeDeck`, registers
@@ -44,9 +44,9 @@ not tidiness: the hooks store the full path to `beacon.ps1`, so running it from
 a Downloads folder you later clear out would stop every session reporting in
 with nothing to say why.
 
-**There is no HUD on a Mac.** It is WinForms, which has no macOS counterpart,
-and a second interface is a second interface to keep in step. What you get
-instead is the same list at `http://localhost:8787/`, and the display.
+It also offers to build the floating window (`hud-macos/`), which needs the
+Command Line Tools but not Xcode. Say no and you still have the same list at
+`http://localhost:8787/`, and the display.
 
 The first time you tap a row, macOS asks whether your terminal may control
 other applications. Until you agree, nothing is raised. That lives in **System

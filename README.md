@@ -401,9 +401,13 @@ Most of this is portable and some of it is not, so here is the honest split.
 transcript, the API, the status page in a browser, the display over Wi-Fi and
 over USB, and tapping a row to bring something to the front.
 
-**Does not:** the floating HUD. It is WinForms, which has no counterpart on
-macOS, and a second UI written in something else is a second UI to keep in step
-with the first. On a Mac you use the display, or open `http://localhost:8787/`.
+**Works, differently:** the floating HUD. The WinForms one has no counterpart
+on macOS, so there is a second one in `hud-macos/` — native AppKit and SwiftUI,
+built by `swiftc` out of the Command Line Tools, no Xcode. It is a second
+interface to keep in step, which is why it owns as little as possible: it reads
+`/sessions.json` off the service and nothing else, so it cannot disagree with
+the status page or the display about what is happening. You can also just open
+`http://localhost:8787/`.
 
 **Coarser:** tapping a row. On Windows the right *window* is picked by matching
 the session title against every open window's title — two projects in the same
@@ -417,11 +421,12 @@ From the release package, install PowerShell and then double-click
 `Install.command`:
 
 ```sh
-brew install --cask powershell   # PowerShell 7; the code is PowerShell
+brew install powershell   # PowerShell 7; the code is PowerShell
 ```
 
 It copies the files to `~/Library/Application Support/ClaudeDeck`, registers the
-hooks, runs the self test and offers to start the web service. The copy matters:
+hooks, runs the self test, offers to build the floating window and offers to
+start the web service. The copy matters:
 the hooks store the full path to `beacon.ps1`, so a folder you later clear out
 takes every session with it.
 
@@ -449,7 +454,8 @@ two it was.
 ### What is not tested
 
 Everything above compiles and runs on Windows, and the platform-specific halves
-are exercised here — but not one line of the macOS path has run on a Mac.
+are exercised here. The macOS path has since been run on a Mac — macOS 26.5,
+Apple silicon, PowerShell 7.6.5 — and what that found is in the section below.
 
 The `ps` parsing was the most likely candidate, and it was in fact broken: it
 read the process id out of `$Matches` after two later matches had already
@@ -460,6 +466,26 @@ every platform, so the same class of mistake cannot go unnoticed again.
 What still cannot be checked from here is everything that needs the machine
 itself: the permission dialog, `route`, `ifconfig`, `osascript`, and whether
 raising an application actually raises it. `selftest.ps1` is where those report.
+
+### What running it on a Mac turned up
+
+`selftest.ps1` passed on the first try, with one warning about there being no
+serial port — there was no display attached. The process table, the `ps`
+parsing, the address lookup, the port and `osascript` were all fine.
+
+Two things were not:
+
+- **`brew install --cask powershell` no longer works.** PowerShell moved out of
+  homebrew-cask and is a formula now, so the cask lookup fails outright. The
+  formula needs no administrator password either, which the cask did. Fixed
+  everywhere it was written down.
+- **The hook interpreter was pinned to a version.** `install-hooks.ps1` took the
+  path of the running process, which under Homebrew is
+  `/opt/homebrew/Cellar/powershell/7.6.5/libexec/pwsh`. That path stops existing
+  the first time PowerShell is upgraded, and every session then silently stops
+  reporting in — exactly the failure the copy-to-a-stable-folder rule exists to
+  prevent, arriving by the other door. It now prefers the stable symlink after
+  checking that it is the same PowerShell.
 
 ## Requirements
 
@@ -477,6 +503,20 @@ Run `diagnose.ps1` first — it checks whether the hooks are registered, whether
 status files are being written, and whether the HUD is running. On a Mac run
 `selftest.ps1` instead: it checks the things that differ there, including the
 permission macOS needs before anything can be brought to the front.
+
+**On a Mac, if `pwsh` itself will not start** — an unhandled
+`System.IO.FileLoadException` about an invalid assembly name, before any of
+this project runs — the culprit is PowerShell's own startup cache, and
+reinstalling does not touch it because it lives in your home directory:
+
+```sh
+rm -rf ~/.cache/powershell
+```
+
+Worth knowing because every tool this project gives you for diagnosing trouble
+is itself written in PowerShell, so this failure takes the diagnostics with it.
+Sessions that were already running keep reporting in, which makes it look like
+something you did rather than something that broke.
 
 | Symptom | Likely cause |
 |---|---|

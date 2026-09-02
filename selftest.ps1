@@ -264,7 +264,19 @@ if ($DashOnWindows) {
     } else {
         Report 'osascript present' 'fail' 'not found' 'without it nothing can be brought to the front'
     }
-    Report 'the floating HUD' 'skip' 'Windows only' ('use the display, or the status page at http://localhost:' + $Port + '/')
+    <#
+      The floating window is a separate build here, so this reports on the two
+      things that decide whether you can have one: whether it is installed, and
+      failing that whether this machine could build it.
+    #>
+    $hudApp = Join-Path $HOME 'Applications/Claude Sessions HUD.app'
+    if (Test-Path $hudApp) {
+        Report 'the floating window' 'ok' $hudApp
+    } elseif (Get-Command swiftc -ErrorAction SilentlyContinue) {
+        Report 'the floating window' 'skip' 'not installed' 'hud-macos/build.sh install builds it -- no Xcode needed'
+    } else {
+        Report 'the floating window' 'skip' 'not installed, and no Swift compiler' 'xcode-select --install, then hud-macos/build.sh install'
+    }
 }
 
 Write-Host ''

@@ -43,9 +43,14 @@ BESTANDEN = [
 MAPPEN = [
     ("cyd",  "cyd"),
     ("case", "case"),
+    # The macOS window is built on the machine it runs on -- swiftc out of the
+    # Command Line Tools, no Xcode -- so what ships is the source and build.sh,
+    # not a bundle. Install.command looks for this folder and offers to build it;
+    # without it here that offer is a permanent "not in this package".
+    ("hud-macos", "hud-macos"),
 ]
 # nobody else needs this
-OVERSLAAN = {"preview.png"}   # stays in the repo, but not in the zip
+OVERSLAAN = {"preview.png", ".gitignore"}  # stay in the repo, not in the zip
 OVERSLAAN_MAPPEN = {"build", "build-s3", "__pycache__"}
 
 
@@ -56,8 +61,9 @@ def voeg_toe(zf, bron, doel, uitvoerbaar=False):
     naam = "%s/%s" % (NAAM, doel)
     if uitvoerbaar:
         # Install.command has to be double-clickable straight out of the zip,
-        # and that is the execute bit. zf.write cannot carry it over from a
-        # Windows checkout, where the file has no such bit to begin with, so
+        # and build.sh has to be runnable; that is the execute bit. zf.write
+        # cannot carry it over from a Windows checkout, where the file has no
+        # such bit to begin with, so
         # we set it on the entry by hand: 0o100755 is "regular file, rwxr-xr-x".
         info = zipfile.ZipInfo.from_file(bron, naam)
         info.external_attr = 0o100755 << 16
@@ -124,7 +130,11 @@ def main():
                         continue
                     p = os.path.join(wortel, f)
                     rel = os.path.relpath(p, vol).replace("\\", "/")
-                    totaal += voeg_toe(zf, p, "%s/%s" % (doelmap, rel))
+                    # A build script that arrives without its execute bit is a
+                    # build script nobody can run, and the zip is written on
+                    # Windows where the file never had one to carry over.
+                    totaal += voeg_toe(zf, p, "%s/%s" % (doelmap, rel),
+                                       f.endswith(".sh"))
 
     # On the finished file rather than the open handle: what ships is what gets
     # checked, and a zip still being written cannot be read back reliably.

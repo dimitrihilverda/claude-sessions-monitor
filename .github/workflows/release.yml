@@ -54,14 +54,19 @@ jobs:
               print("  %8d  %s" % (z.getinfo(n).file_size, n))
           nodig = ['sessionlib.ps1', 'focuslib.ps1', 'langlib.ps1', 'platformlib.ps1',
                    'beacon.ps1', 'hud.ps1', 'hud.vbs', 'install.ps1', 'Install.cmd',
-                   'install-hooks.ps1', 'selftest.ps1', 'Install.command']
+                   'install-hooks.ps1', 'selftest.ps1', 'Install.command',
+                   'hud-macos/build.sh', 'hud-macos/Sources/main.swift']
           mist = [n for n in nodig if not any(x.endswith('/' + n) for x in namen)]
           assert not mist, "missing from the package: %s" % mist
           print("all required files present")
-          mac = [n for n in namen if n.endswith('/Install.command')][0]
-          mode = z.getinfo(mac).external_attr >> 16
-          assert mode & 0o111, "Install.command is not executable in the zip (mode %o)" % mode
-          print("Install.command is executable (%o)" % mode)
+          # Both are double-clicked or run straight out of the zip, and the zip
+          # is written on Windows where neither file has an execute bit to carry
+          # over -- so the bit is set by hand, and checked here.
+          for eind in ('/Install.command', '/hud-macos/build.sh'):
+              naam = [n for n in namen if n.endswith(eind)][0]
+              mode = z.getinfo(naam).external_attr >> 16
+              assert mode & 0o111, "%s is not executable in the zip (mode %o)" % (naam, mode)
+              print("%s is executable (%o)" % (naam, mode))
           PY
 
       - name: Attach it to the release

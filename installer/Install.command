@@ -66,6 +66,14 @@ else
         rm -rf "$DOEL/cyd"
         cp -R "$BRON/cyd" "$DOEL/cyd" && zeg '+ cyd/ (sketch and instructions)'
     fi
+    # The window's source, for the same reason everything else is copied: the
+    # folder you unzipped is a folder you will clear out, and rebuilding after
+    # a Swift or macOS update should not mean fetching the package again.
+    if [ -d "$BRON/hud-macos" ]; then
+        rm -rf "$DOEL/hud-macos"
+        cp -R "$BRON/hud-macos" "$DOEL/hud-macos" && zeg '+ hud-macos/ (the floating window)'
+        chmod +x "$DOEL/hud-macos/build.sh" 2>/dev/null || true
+    fi
 fi
 # The beacon makes this itself on its first run, but the API answers with an
 # empty list until it exists -- which looks exactly like a broken install.
@@ -90,7 +98,11 @@ zeg 'If anything above says FAIL, that output is the thing to send back.'
 
 # ---- 5. the floating window -------------------------------------------------
 kop 'The floating window'
-if [ ! -d "$BRON/hud-macos" ]; then
+# Built from the installed copy where there is one, so the path printed below
+# is a path that still exists tomorrow.
+HUDMAP="$BRON/hud-macos"
+[ -d "$DOEL/hud-macos" ] && HUDMAP="$DOEL/hud-macos"
+if [ ! -d "$HUDMAP" ]; then
     zeg 'Not in this package.'
 elif ! command -v swiftc >/dev/null 2>&1; then
     zeg 'Skipped: no Swift compiler here.'
@@ -98,16 +110,16 @@ elif ! command -v swiftc >/dev/null 2>&1; then
     zeg ''
     zeg '    xcode-select --install'
     zeg ''
-    zeg 'Then run hud-macos/build.sh install. Xcode itself is not needed.'
+    zeg "Then run $HUDMAP/build.sh install. Xcode itself is not needed."
 else
     zeg 'A window that floats above everything, listing your sessions.'
     zeg 'Built here from source; it needs no Xcode, only the Command Line Tools.'
     echo
     read -r -p '  Build and install it? [Y/n] ' hudantwoord
     case "$hudantwoord" in
-        [Nn]*) zeg 'Skipped. hud-macos/build.sh install does it later.' ;;
+        [Nn]*) zeg "Skipped. $HUDMAP/build.sh install does it later." ;;
         *)
-            if (cd "$BRON/hud-macos" && ./build.sh install); then
+            if (cd "$HUDMAP" && ./build.sh install); then
                 zeg 'The window is up. Right-click it for the menu.'
             else
                 fout 'Building the window failed. The rest of the install is fine.'

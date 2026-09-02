@@ -10,7 +10,7 @@ project surfaces that state in three places that share one source of truth.
 
 | Where | What it is |
 |---|---|
-| **Floating HUD** | A small always-on-top window on your desktop listing every session |
+| **Floating HUD** | A small always-on-top window on your desktop listing every session — WinForms on Windows, AppKit on macOS |
 | **Cheap Yellow Display** | A £10 ESP32 touchscreen on your desk, with three physical buttons |
 | **Guition JC3248W535C** | The same thing on twice the pixels, with capacitive touch — [the nicer screen](#the-bigger-screen-guition-jc3248w535c) |
 | **Web page** | The same list on your phone or tablet, on your own network |
@@ -454,7 +454,8 @@ wscript.exe hud.vbs
 | `sessionlib.ps1`, `focuslib.ps1` | shared logic |
 | `platformlib.ps1` | the few things Windows and macOS do not share |
 | `langlib.ps1` | every user-visible string, in both languages |
-| `hud.ps1`, `hud.vbs` | the floating HUD |
+| `hud.ps1`, `hud.vbs` | the floating HUD on Windows |
+| `hud-macos/` | the floating window on macOS: Swift sources, and the script that builds them |
 | `session-api.ps1`, `api.vbs`, `actions.json` | web service, and what the buttons do |
 | `cyd/` | Arduino sketch, TFT settings, flashing and wiring instructions |
 | `case/` | printable enclosure: STLs, parametric generator, build notes |
@@ -487,6 +488,35 @@ editor end up in the right one. On macOS there is no window list to score, so
 you get the right *application* and which tab is in front inside it is up to the
 application.
 
+### The floating window
+
+`hud-macos/` builds a 488 KB `.app` with `swiftc` out of the Command Line Tools:
+
+```sh
+hud-macos/build.sh           # build build/Claude Sessions HUD.app
+hud-macos/build.sh test      # thirty-four checks on the part without a window
+hud-macos/build.sh install   # build, put it in ~/Applications, start it
+```
+
+Same colours as everywhere else, same rule about beeping only on the change to
+orange. Clicking a row raises that terminal, `Enter` and `Esc` appear on an
+orange row and do what the buttons on the display do, and the right-click menu
+carries everything from the Windows one that means anything off Windows:
+always-on-top, compact rows, only-what-needs-me, hiding sessions, the address to
+copy, start-at-login, restart and quit. The display half of that menu — the
+cracktro, releasing the USB port — is not there, because it belongs to `cyd/`.
+
+Two things follow from it reading `/sessions.json` and nothing else. It needs no
+Automation permission of its own, since raising a window stays the service's
+job with the permission the service already has. And it shows nothing without
+the service running — it says so rather than showing an empty list, which is
+also why "Start when I log in" writes two LaunchAgents, one for each.
+
+Dutch on a Dutch Mac, English everywhere else: `Strings.swift` mirrors
+`langlib.ps1` key for key. [`hud-macos/README.md`](hud-macos/README.md) has the
+rest — the file-by-file split, the settings file, and the fake service you can
+point it at to see every state without waiting for one.
+
 ### Setting it up
 
 From the release package, install PowerShell and then double-click
@@ -507,8 +537,12 @@ From a git checkout, the same four steps by hand:
 ```sh
 pwsh -NoProfile -File selftest.ps1      # what works on this machine, and what does not
 pwsh -NoProfile -File install-hooks.ps1 # register the hooks in ~/.claude/settings.json
-pwsh -NoProfile -File session-api.ps1   # the service the display talks to
+pwsh -NoProfile -File session-api.ps1   # the service the display and the window talk to
+hud-macos/build.sh install              # the floating window, into ~/Applications
 ```
+
+The window is built last on purpose: it reads `/sessions.json` off the service
+and shows nothing at all without it.
 
 Run `selftest.ps1` **first**. The Mac side was written without a Mac to try it
 on, so instead of a page of "this should work" every assumption it rests on is a
@@ -523,7 +557,7 @@ Security > Automation** (some versions want **Accessibility** as well).
 `selftest.ps1` reports exactly this, so you do not have to guess which of the
 two it was.
 
-### What is not tested
+### What is tested, and what is not
 
 Everything above compiles and runs on Windows, and the platform-specific halves
 are exercised here. The macOS path has since been run on a Mac — macOS 26.5,
